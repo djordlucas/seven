@@ -1,10 +1,15 @@
 import type { ToolMeta } from "../tools/store.ts";
 
 export function systemPrompt(opts: { workspace: string; tools: ToolMeta[]; runs?: string[] }): string {
+  const enabled = opts.tools.filter((t) => !t.disabled);
+  const disabled = opts.tools.filter((t) => t.disabled);
   const own =
-    opts.tools.length === 0
+    (opts.tools.length === 0
       ? "You have built no tools yet."
-      : `Tools you have built so far: ${opts.tools.map((t) => t.name).join(", ")}.`;
+      : `Tools you have built so far: ${enabled.map((t) => t.name).join(", ") || "none enabled"}.`) +
+    (disabled.length > 0
+      ? ` Disabled, and not in your tool list: ${disabled.map((t) => `${t.name} (${t.disabled?.reason})`).join("; ")}.`
+      : "");
 
   const runs = opts.runs?.length
     ? `\n\n## Your background runs\n\nStill running, or finished and not checked yet:\n${opts.runs.map((r) => `- ${r}`).join("\n")}`
@@ -27,6 +32,10 @@ One global is provided: \`seven.llm.chat(prompt: string, system?: string) -> Pro
 ## Sync and async calls
 
 Calling a tool directly is synchronous: you wait for its result. To run a tool asynchronously, call start_tool with its name and arguments: it returns a run id at once and the tool keeps running while you do other things. Check on it with run_status, block on it with wait_run, stop it with kill_run, and see all of them with list_runs. Use start_tool for anything slow, long-running, or that might hang, and kill a run that misbehaves.
+
+## Misbehaving tools
+
+Every run of your tools is recorded. tool_health shows a tool's recent runs, failures and durations. A tool that keeps failing, hanging or doing damage should be fixed with define_tool; if you cannot fix it now, disable_tool takes it out of your tool list without losing it, and enable_tool or a new definition brings it back. A tool that is meant to be slow can declare its own timeout_ms in define_tool.
 
 ## Working
 

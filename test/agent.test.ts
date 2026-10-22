@@ -172,4 +172,98 @@ describe("agent", () => {
     assert.equal(results?.[3], 'error: no tool named "define_tool" that can run in the background');
     assert.equal(results?.[4], 'error: no run "r9"');
   });
+
+  it("records every run of a tool and reports it in tool_health", async () => {
+    const flaky = {
+      name: "flaky",
+      description: "Fails on odd input.",
+      parameters: { type: "object" },
+      code: "export default ({ n }: { n: number }) => { if (n % 2) throw new Error(`odd ${n}`); return n }",
+    };
+    const { agent, model, store } = setup([
+      call("i1", "define_tool", flaky),
+      call("i2", "flaky", { n: 2 }),
+      call("i3", "flaky", { n: 3 }),
+      call("i4", "start_tool", { tool: "flaky", args: { n: 4 } }),
+      call("i5", "wait_run", { id: "r1" }),
+      call("i6", "tool_health", { name: "flaky" }),
+      { role: "assistant", content: "ok" },
+    ]);
+    await agent.send("go");
+
+    assert.deepEqual(
+      store.history("flaky").map(({ mode, ok, error, revision }) => ({ mode, ok, error, revision })),
+      [
+        { mode: "sync", ok: true, error: undefined, revision: 1 },
+        { mode: "sync", ok: false, error: "Error: odd 3", revision: 1 },
+        { mode: "async", ok: true, error: undefined, revision: 1 },
+      ],
+    );
+    const report = String(model.seen.at(-1)?.messages.at(-1)?.content);
+    assert.match(report, /^flaky \(revision 1\): enabled\nrun limit: default\nlast 3 runs: 2 ok, 1 failed; median /);
+    assert.match(report, /\n- \S+ r1 sync \d+\.\ds failed: Error: odd 3\n/);
+  });
+
+  it("disables a tool: hidden, refused, named in the prompt, then re-enabled", async () => {
+    const tool = { name: "bad", description: "Misbehaves.", parameters: { type: "object" }, code: "export default 1" };
+    const { agent, model, store } = setup([
+      call("j1", "define_tool", tool),
+      call("j2", "disable_tool", { name: "bad", reason: "deletes files" }),
+      call("j3", "bad", {}),
+      call("j4", "start_tool", { tool: "bad" }),
+      call("j5", "enable_tool", { name: "bad" }),
+      call("j6", "disable_tool", { name: "bad", reason: "still bad" }),
+      call("j7", "define_tool", tool),
+      { role: "assistant", content: "ok" },
+    ]);
+    await agent.send("go");
+
+    const offered = (i: number) => model.seen[i]?.tools.some((t) => t.name === "bad");
+    const prompt = (i: number) => String(model.seen[i]?.messages[0]?.content);
+    const result = (i: number) => String(model.seen[i]?.messages.at(-1)?.content);
+    assert.equal(offered(2), false);
+    assert.match(prompt(2), /Disabled, and not in your tool list: bad \(deletes files\)/);
+    assert.equal(
+      result(3),
+      'error: tool "bad" is disabled (deletes files). Fix it with define_tool, or enable_tool to use it as is.',
+    );
+    assert.equal(result(4), result(3));
+    assert.equal(offered(5), true, "enable_tool brings it back");
+    assert.equal(offered(6), false);
+    assert.equal(offered(7), true, "a new definition clears disabled");
+    assert.equal(store.get("bad")?.meta.revision, 2);
+    assert.equal(store.get("bad")?.meta.disabled, undefined);
+  });
+
+  it("applies a tool's own timeout_ms and keeps history across redefinition", async () => {
+    const slow = {
+      name: "slow",
+      description: "Never returns.",
+      parameters: { type: "object" },
+      code: "export default () => new Promise(() => {})",
+      timeout_ms: 300,
+    };
+    const { agent, model, store } = setup([
+      call("k1", "define_tool", slow),
+      call("k2", "slow", {}),
+      call("k3", "define_tool", { ...slow, code: "export default 'fixed'", timeout_ms: undefined }),
+      call("k4", "slow", {}),
+      call("k5", "tool_health", { name: "slow" }),
+      { role: "assistant", content: "ok" },
+    ]);
+    await agent.send("go");
+
+    assert.equal(String(model.seen[2]?.messages.at(-1)?.content), "error: timed out after 300ms");
+    assert.deepEqual(
+      store.history("slow").map((r) => [r.revision, r.ok]),
+      [
+        [1, false],
+        [2, true],
+      ],
+    );
+    assert.match(
+      String(model.seen[5]?.messages.at(-1)?.content),
+      /^slow \(revision 2\): enabled\nrun limit: default\n/,
+    );
+  });
 });

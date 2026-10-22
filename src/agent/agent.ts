@@ -4,7 +4,7 @@
 import type { ChatModel, Message, ToolCall, ToolDef } from "../llm/mistral.ts";
 import type { Runner } from "../runner/index.ts";
 import type { ToolStore } from "../tools/store.ts";
-import { type Builtin, builtins, formatRun } from "./builtins.ts";
+import { type Builtin, builtins, disabledError, formatRun, startGenerated } from "./builtins.ts";
 import { systemPrompt } from "./prompt.ts";
 import { RunTable, summarize } from "./runs.ts";
 
@@ -46,7 +46,9 @@ export class Agent {
       const own = store.list();
       const tools: ToolDef[] = [
         ...[...this.builtins.values()].map(({ name, description, parameters }) => ({ name, description, parameters })),
-        ...own.map(({ name, description, parameters }) => ({ name, description, parameters })),
+        ...own
+          .filter((t) => !t.disabled)
+          .map(({ name, description, parameters }) => ({ name, description, parameters })),
       ];
       const runs = this.runs
         .list()
@@ -86,7 +88,8 @@ export class Agent {
       const builtin = this.builtins.get(name);
       const own = builtin ? undefined : this.opts.store.get(name);
       if (builtin) result = await builtin.run(args);
-      else if (own) result = formatRun(await this.opts.runner.runFile(own.file, args));
+      else if (own?.meta.disabled) result = disabledError(own);
+      else if (own) result = formatRun(await startGenerated(this.opts.runner, this.opts.store, own, args, "sync").done);
       else result = `error: no tool named "${name}"`;
     } catch (err) {
       result = `error: ${err instanceof Error ? err.message : String(err)}`;

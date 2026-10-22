@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ToolDef } from "../llm/mistral.ts";
 import type { RunHandle, Runner, RunResult } from "../runner/index.ts";
-import { TOOL_NAME, type ToolStore } from "../tools/store.ts";
+import { type StoredTool, TOOL_NAME, type ToolStore } from "../tools/store.ts";
 import { describe, type RunTable, summarize } from "./runs.ts";
 
 export interface Builtin extends ToolDef {
@@ -58,6 +58,10 @@ export function builtins(runner: Runner, store: ToolStore, runs: RunTable): Buil
           code: { type: "string", description: "ES module source (TypeScript allowed)." },
           deps: depsSchema,
           test_args: { type: "object", description: "Arguments for a trial run before saving." },
+          timeout_ms: {
+            type: "integer",
+            description: "Run limit for this tool, for one that is meant to be slow. Defaults to the normal run limit.",
+          },
         },
         required: ["name", "description", "parameters", "code"],
       },
@@ -67,6 +71,7 @@ export function builtins(runner: Runner, store: ToolStore, runs: RunTable): Buil
         if (names.has(name)) return `error: "${name}" is a built-in tool and cannot be replaced`;
         const source = String(a.code);
         const deps = asDeps(a.deps) ?? {};
+        const timeoutMs = positive(a.timeout_ms, 0) || undefined;
 
         let packages: Awaited<ReturnType<Runner["install"]>>;
         try {
@@ -77,7 +82,7 @@ export function builtins(runner: Runner, store: ToolStore, runs: RunTable): Buil
 
         let trial = "";
         if (a.test_args !== undefined) {
-          const r = await trialRun(runner, name, source, a.test_args);
+          const r = await trialRun(runner, name, source, a.test_args, timeoutMs);
           if (!r.ok) return `not saved: the trial run failed\n${formatRun(r)}`;
           trial = `\ntrial run:\n${formatRun(r)}`;
         }
@@ -89,6 +94,7 @@ export function builtins(runner: Runner, store: ToolStore, runs: RunTable): Buil
             parameters: (a.parameters as Record<string, unknown>) ?? { type: "object" },
             deps,
             packages,
+            ...(timeoutMs && { timeoutMs }),
           },
           source,
         });
@@ -141,7 +147,8 @@ export function builtins(runner: Runner, store: ToolStore, runs: RunTable): Buil
         } else {
           const own = store.get(tool);
           if (!own) return `error: no tool named "${tool}"${names.has(tool) ? " that can run in the background" : ""}`;
-          handle = runner.startFile(own.file, args, timeoutMs);
+          if (own.meta.disabled) return disabledError(own);
+          handle = startGenerated(runner, store, own, args, "async", timeoutMs);
         }
         const run = runs.add(tool, handle);
         return `started ${run.id} (${tool})`;
@@ -212,21 +219,128 @@ export function builtins(runner: Runner, store: ToolStore, runs: RunTable): Buil
         return all.length === 0 ? "no background runs" : all.map((r) => summarize(r)).join("\n");
       },
     },
+    {
+      name: "tool_health",
+      description:
+        "Show how one of your tools has been behaving: whether it is disabled, its run limit, and its recent runs " +
+        "with their outcome, duration and errors. Use it to decide whether to fix, disable or delete a tool.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          last: { type: "integer", description: "Runs to show, newest first. Default 10." },
+        },
+        required: ["name"],
+      },
+      async run(a) {
+        const t = store.get(String(a.name));
+        if (!t) return `error: no tool named "${String(a.name)}"`;
+        return health(t, store, positive(a.last, 10));
+      },
+    },
+    {
+      name: "disable_tool",
+      description:
+        "Disable one of your tools that misbehaves: it disappears from your tool list and calls to it are refused, " +
+        "but it is kept. Redefining it with define_tool, or enable_tool, brings it back.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          reason: { type: "string", description: "What is wrong with it; shown to you while it is disabled." },
+        },
+        required: ["name", "reason"],
+      },
+      async run(a) {
+        const name = String(a.name);
+        return store.setDisabled(name, String(a.reason)) ? `disabled ${name}` : `error: no tool named "${name}"`;
+      },
+    },
+    {
+      name: "enable_tool",
+      description: "Re-enable a disabled tool as it is.",
+      parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+      async run(a) {
+        const name = String(a.name);
+        return store.setDisabled(name, null) ? `enabled ${name}` : `error: no tool named "${name}"`;
+      },
+    },
   ];
   for (const b of list) names.add(b.name);
   return list;
 }
 
 /** Run a candidate tool from a scratch file under the runner's home, so its imports resolve. */
-async function trialRun(runner: Runner, name: string, source: string, args: unknown): Promise<RunResult> {
+async function trialRun(
+  runner: Runner,
+  name: string,
+  source: string,
+  args: unknown,
+  timeoutMs?: number,
+): Promise<RunResult> {
   const dir = fs.mkdtempSync(path.join(runner.home, "tmp", `trial-${name}-`));
   const file = path.join(dir, "source.ts");
   fs.writeFileSync(file, source);
   try {
-    return await runner.runFile(file, args);
+    return await runner.runFile(file, args, timeoutMs);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Start a generated tool, recording the outcome in its run history when it ends. */
+export function startGenerated(
+  runner: Runner,
+  store: ToolStore,
+  tool: StoredTool,
+  args: unknown,
+  mode: "sync" | "async",
+  timeoutMs?: number,
+): RunHandle {
+  const handle = runner.startFile(tool.file, args, timeoutMs ?? tool.meta.timeoutMs);
+  void handle.done.then((r) =>
+    store.recordRun(tool.meta.name, {
+      at: new Date(handle.startedAt).toISOString(),
+      revision: tool.meta.revision,
+      mode,
+      ok: r.ok,
+      durationMs: r.durationMs,
+      ...(!r.ok && { error: (r.error ?? "").split("\n")[0] }),
+    }),
+  );
+  return handle;
+}
+
+export function disabledError(tool: StoredTool): string {
+  const d = tool.meta.disabled;
+  return `error: tool "${tool.meta.name}" is disabled (${d?.reason}). Fix it with define_tool, or enable_tool to use it as is.`;
+}
+
+function health(tool: StoredTool, store: ToolStore, last: number): string {
+  const { meta } = tool;
+  const runs = store.history(meta.name);
+  const lines = [
+    `${meta.name} (revision ${meta.revision}): ${meta.disabled ? `disabled since ${meta.disabled.at}: ${meta.disabled.reason}` : "enabled"}`,
+    `run limit: ${meta.timeoutMs ? `${meta.timeoutMs}ms` : "default"}`,
+  ];
+  if (runs.length === 0) return [...lines, "no runs recorded"].join("\n");
+
+  const ok = runs.filter((r) => r.ok).length;
+  const durations = runs.map((r) => r.durationMs).sort((x, y) => x - y);
+  const median = durations[Math.floor(durations.length / 2)] ?? 0;
+  lines.push(
+    `last ${runs.length} runs: ${ok} ok, ${runs.length - ok} failed; median ${secs(median)}, slowest ${secs(durations.at(-1) ?? 0)}`,
+    "recent runs, newest first:",
+    ...runs
+      .slice(-last)
+      .reverse()
+      .map((r) => `- ${r.at} r${r.revision} ${r.mode} ${secs(r.durationMs)} ${r.ok ? "ok" : `failed: ${r.error}`}`),
+  );
+  return lines.join("\n");
+}
+
+function secs(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 export function formatRun(r: RunResult): string {
