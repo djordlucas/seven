@@ -1,0 +1,31 @@
+{
+  "name": "seven",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An experimental LLM agent that builds its own tools, running them in a QuickJS-in-Wasm VM.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "seven": "src/main.ts"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --test 'test/**/*.test.ts'",
+    "lint": "biome check .",
+    "fmt": "biome check --write .",
+    "ci": "npm run typecheck && npm run lint && npm test"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2",
+    "quickjs-emscripten": "0.32.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.2",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}
