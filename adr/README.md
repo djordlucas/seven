@@ -23,7 +23,13 @@ its behavior is absorbed into `docs/` and the plan stays as the record.
 
 | Document | What it records | Shipped |
 |----------|-----------------|---------|
-| `vm-runtime.md` | The VM as a simpler equivalent of nine's tool VM: what was kept, what was dropped and why | 2026-10-21, bootstrap |
+| `child-process-runner.md` | Replacing the QuickJS-in-wasm VM with a Node.js child process per run; the npm compatibility probe that decided it | 2026-10-21 |
+
+### Superseded
+
+| Document | What it records | Superseded by |
+|----------|-----------------|---------------|
+| `vm-runtime.md` | The QuickJS-in-wasm VM as a simpler equivalent of nine's tool VM: what was kept, what was dropped and why | `child-process-runner.md` |
 
 ## Limits
 

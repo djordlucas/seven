@@ -8,14 +8,16 @@ export interface Config {
   apiKey: string;
   model: string;
   endpoint: string;
-  /** seven's own state: generated tools and the npm cache. */
+  /** seven's own state: generated tools and the node_modules they import from. */
   home: string;
-  /** Where the agent works; guest relative paths resolve here. */
+  /** Where the agent works: the working directory of every run. */
   workspace: string;
   /** Model calls one user message may take before the turn is stopped. */
   maxSteps: number;
-  /** Wall-clock budget for one VM run. */
+  /** Wall-clock budget of one run. */
   runTimeoutMs: number;
+  /** V8 heap cap of one run, in MiB. */
+  runMemoryMb: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -28,6 +30,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workspace,
     maxSteps: int(env.SEVEN_MAX_STEPS, 40),
     runTimeoutMs: int(env.SEVEN_RUN_TIMEOUT_MS, 60_000),
+    runMemoryMb: int(env.SEVEN_RUN_MEMORY_MB, 1024),
   };
 }
 

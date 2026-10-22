@@ -5,8 +5,8 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { Agent } from "../src/agent/agent.ts";
 import type { ChatModel, Completion, Message, ToolDef } from "../src/llm/mistral.ts";
+import { createRunner } from "../src/runner/index.ts";
 import { ToolStore } from "../src/tools/store.ts";
-import { createVM } from "../src/vm/index.ts";
 
 /** A model that plays back fixed replies and records what it was shown. */
 class ScriptedModel implements ChatModel {
@@ -34,9 +34,9 @@ const call = (id: string, name: string, args: unknown) => ({
 function setup(replies: Completion["message"][]) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "seven-agent-test-"));
   const store = new ToolStore(path.join(home, "tools"));
-  const vm = createVM({ cwd: home, depsDir: path.join(home, "deps") });
+  const runner = createRunner({ home, cwd: home });
   const model = new ScriptedModel(replies);
-  return { store, model, agent: new Agent({ model, vm, store, workspace: home, maxSteps: 10 }) };
+  return { store, model, agent: new Agent({ model, runner, store, workspace: home, maxSteps: 10 }) };
 }
 
 describe("agent", () => {

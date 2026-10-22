@@ -11,9 +11,8 @@ import { styleText } from "node:util";
 import { Agent, type AgentEvent } from "./agent/agent.ts";
 import { loadConfig } from "./config.ts";
 import { Mistral } from "./llm/mistral.ts";
+import { createRunner, llmModule } from "./runner/index.ts";
 import { ToolStore } from "./tools/store.ts";
-import { llmModule } from "./vm/host.ts";
-import { createVM } from "./vm/index.ts";
 
 const cfg = loadConfig();
 const store = new ToolStore(path.join(cfg.home, "tools"));
@@ -30,14 +29,15 @@ if (!cfg.apiKey) {
 }
 
 const model = new Mistral({ apiKey: cfg.apiKey, model: cfg.model, endpoint: cfg.endpoint });
-const vm = createVM({
+const runner = createRunner({
+  home: cfg.home,
   cwd: cfg.workspace,
-  depsDir: path.join(cfg.home, "deps"),
   timeoutMs: cfg.runTimeoutMs,
+  memoryMb: cfg.runMemoryMb,
   host: { llm: llmModule(model) },
 });
 
-const agent = new Agent({ model, vm, store, workspace: cfg.workspace, maxSteps: cfg.maxSteps, onEvent: show });
+const agent = new Agent({ model, runner, store, workspace: cfg.workspace, maxSteps: cfg.maxSteps, onEvent: show });
 
 function show(e: AgentEvent): void {
   if (e.type === "tool_call") console.error(styleText("cyan", `→ ${e.name}`), styleText("dim", clip(e.args, 400)));

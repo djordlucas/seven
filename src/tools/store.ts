@@ -1,8 +1,8 @@
 // Generated tools: the part of seven that seven writes.
 //
-// Each tool is a directory under <home>/tools/<name>/ holding its definition,
-// the source as written, and the bundle the VM runs. The store is re-read every
-// model step, so a tool defined mid-turn is callable on the next step.
+// Each tool is a directory under <home>/tools/<name>/ holding its definition
+// and its source, which the runner runs as-is. The store is re-read every model
+// step, so a tool defined mid-turn is callable on the next step.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -14,7 +14,7 @@ export interface ToolMeta {
   parameters: Record<string, unknown>;
   /** Version ranges as requested. */
   deps: Record<string, string>;
-  /** What the bundle actually contains. */
+  /** Packages the source imports, with the version installed when it was saved. */
   packages: { name: string; version: string }[];
   createdAt: string;
   updatedAt: string;
@@ -25,7 +25,8 @@ export interface ToolMeta {
 export interface StoredTool {
   meta: ToolMeta;
   source: string;
-  bundle: string;
+  /** Absolute path of the source file, for the runner. */
+  file: string;
 }
 
 export const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
@@ -54,11 +55,11 @@ export class ToolStore {
 
   get(name: string): StoredTool | undefined {
     if (!TOOL_NAME.test(name) || !fs.existsSync(path.join(this.dir, name, "tool.json"))) return undefined;
-    const at = (f: string) => fs.readFileSync(path.join(this.dir, name, f), "utf8");
-    return { meta: this.readMeta(name), source: at("source.ts"), bundle: at("bundle.js") };
+    const file = path.join(this.dir, name, "source.ts");
+    return { meta: this.readMeta(name), source: fs.readFileSync(file, "utf8"), file };
   }
 
-  save(tool: Omit<StoredTool, "meta"> & { meta: Omit<ToolMeta, "createdAt" | "updatedAt" | "revision"> }): ToolMeta {
+  save(tool: { meta: Omit<ToolMeta, "createdAt" | "updatedAt" | "revision">; source: string }): ToolMeta {
     const { name } = tool.meta;
     if (!TOOL_NAME.test(name)) throw new Error(`invalid tool name "${name}": must match ${TOOL_NAME}`);
     const prev = this.get(name)?.meta;
@@ -71,14 +72,13 @@ export class ToolStore {
     };
 
     // Written to a sibling directory and renamed, so a reader never sees a
-    // tool.json that disagrees with its bundle.
+    // tool.json that disagrees with its source.
     const final = path.join(this.dir, name);
     const tmp = path.join(this.dir, `.${name}.${process.pid}.tmp`);
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.mkdirSync(tmp, { recursive: true });
     fs.writeFileSync(path.join(tmp, "tool.json"), `${JSON.stringify(meta, null, 2)}\n`);
     fs.writeFileSync(path.join(tmp, "source.ts"), tool.source);
-    fs.writeFileSync(path.join(tmp, "bundle.js"), tool.bundle);
     fs.rmSync(final, { recursive: true, force: true });
     fs.renameSync(tmp, final);
     return meta;

@@ -21,7 +21,7 @@ This policy applies to the Seven source code and its Docker image.
 ## Not In Scope
 
 - **The VM's lack of a permission model.** Code the agent writes can read and write any file, run any command and
-  reach any URL the seven process can. That is the design (see `docs/vm.md`), not a vulnerability. Run seven in its
+  reach any URL the seven process can. That is the design (see `docs/runner.md`), not a vulnerability. Run seven in its
   container.
 - Vulnerabilities in dependencies (report to the upstream project)
 - npm packages the agent chooses to install

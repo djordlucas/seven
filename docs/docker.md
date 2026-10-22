@@ -3,7 +3,7 @@
 Seven runs and is developed in Docker. The image has two targets built from one
 pinned Node base: `dev` for working on seven with the repository bind-mounted,
 and `runtime` for running the agent unprivileged. Because the VM has no
-permission model (`vm.md`), the container is what bounds the agent: it sees the
+permission model (`runner.md`), the container is what bounds the agent: it sees the
 mounted workspace, its own state volume, and the network.
 
 ```bash
@@ -26,8 +26,8 @@ make ci                 # typecheck + lint + tests in the dev container
 |------|---------|--------|-------|
 | `/app` | dev | the repository (bind) | seven's source |
 | `/app/node_modules` | dev | `dev-node-modules` (named volume) | the container's own dependencies; the host's are built for the host platform |
-| `/app/.seven` | dev | inside the bind mount | `SEVEN_HOME` in development |
-| `/data` | seven | `seven-data` (named volume) | `SEVEN_HOME`: generated tools and the dependency cache |
+| `/app/.seven` | dev | inside the bind mount | `SEVEN_HOME` in development: generated tools and their `node_modules` |
+| `/data` | seven | `seven-data` (named volume) | `SEVEN_HOME`: generated tools and their `node_modules` |
 | `/workspace` | both | `./workspace` (bind) | `SEVEN_WORKSPACE`: where the agent works |
 
 ## Make targets

@@ -2,8 +2,8 @@
 // answers without calling one.
 
 import type { ChatModel, Message, ToolCall, ToolDef } from "../llm/mistral.ts";
+import type { Runner } from "../runner/index.ts";
 import type { ToolStore } from "../tools/store.ts";
-import type { VM } from "../vm/index.ts";
 import { type Builtin, builtins, formatRun } from "./builtins.ts";
 import { systemPrompt } from "./prompt.ts";
 
@@ -17,7 +17,7 @@ export type AgentEvent =
 
 export interface AgentOptions {
   model: ChatModel;
-  vm: VM;
+  runner: Runner;
   store: ToolStore;
   workspace: string;
   maxSteps: number;
@@ -31,7 +31,7 @@ export class Agent {
 
   constructor(opts: AgentOptions) {
     this.opts = opts;
-    this.builtins = new Map(builtins(opts.vm, opts.store).map((b) => [b.name, b]));
+    this.builtins = new Map(builtins(opts.runner, opts.store).map((b) => [b.name, b]));
   }
 
   /** Handle one user message; resolves with the final answer. */
@@ -77,7 +77,7 @@ export class Agent {
       const builtin = this.builtins.get(name);
       const own = builtin ? undefined : this.opts.store.get(name);
       if (builtin) result = await builtin.run(args);
-      else if (own) result = formatRun(await this.opts.vm.run(own.bundle, args));
+      else if (own) result = formatRun(await this.opts.runner.runFile(own.file, args));
       else result = `error: no tool named "${name}"`;
     } catch (err) {
       result = `error: ${err instanceof Error ? err.message : String(err)}`;

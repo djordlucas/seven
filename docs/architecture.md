@@ -1,8 +1,8 @@
 # Architecture
 
 Seven is a single Node.js process: a CLI driving one agent loop, a Mistral
-client, a tool store on disk, and the VM that runs every piece of code the model
-writes. The agent starts with four built-in tools and grows by writing
+client, a tool store on disk, and the runner that runs every piece of code the
+model writes in a child process. The agent starts with four built-in tools and grows by writing
 generated tools, which are saved to the tool store and offered to the model
 from the next step onward.
 
@@ -15,13 +15,16 @@ from the next step onward.
             │   built-ins / generated tools        │
             │            │          ▲              │
             │            ▼          │ read/write   │
-            │           VM      tool store         │
-            │   (QuickJS in wasm) ($SEVEN_HOME)    │
-            │            │                         │
-            │      seven:* host modules            │
+            │         runner     tool store        │
+            │            │      ($SEVEN_HOME)      │
             └────────────┼─────────────────────────┘
+                 spawn   │  ▲ IPC: result, seven.llm.chat
+                         ▼  │
+            ┌── node child process (per run) ──────┐
+            │  all of Node · npm packages          │
+            └──────────────────────────────────────┘
                          ▼
-          files · shell · network · WASI · the model
+               files · shell · network
 ```
 
 ## Components
@@ -31,8 +34,8 @@ from the next step onward.
 | CLI | Reads configuration from the environment, wires the components, runs one message (`seven "<message>"`) or an interactive session (`seven`), and lists generated tools (`seven tools`). Tool calls and results are echoed to stderr. |
 | Agent loop | Sends the conversation and the current tool list to the model, runs every tool call in the reply, appends the results, and repeats until a reply has no tool calls or the step budget runs out. |
 | Mistral client | One non-streamed chat completion per step, with function tools. Retries 429 and 5xx responses with backoff, honouring `retry-after`. |
-| Tool store | One directory per generated tool under `$SEVEN_HOME/tools/`: its definition, the source as written, and the bundle the VM runs. |
-| VM | Bundles source and runs it in a fresh QuickJS runtime per run (`vm.md`). |
+| Tool store | One directory per generated tool under `$SEVEN_HOME/tools/`: its definition and its source, which the runner runs as-is. |
+| Runner | Installs the npm packages source imports and runs it in a fresh Node.js child process per run (`runner.md`). |
 
 ## A turn
 
@@ -40,8 +43,9 @@ from the next step onward.
 2. The system prompt is rebuilt, and the tool list is the built-ins plus every
    generated tool in the store, re-read on every step.
 3. The model replies. A reply without tool calls is the answer and ends the turn.
-4. Each tool call runs in order. A built-in runs as host code that may use the
-   VM; a generated tool runs its bundle in the VM with the call's arguments.
+4. Each tool call runs in order. A built-in runs in the seven process and may
+   use the runner; a generated tool runs its source in a child process with the
+   call's arguments.
    An unknown tool or invalid arguments produce an `error: …` result for the
    model, never an exception.
 5. Each result is cut to 16,000 characters and appended as a `tool` message.
@@ -54,8 +58,8 @@ A turn that reaches `SEVEN_MAX_STEPS` model calls (default 40) ends with
 
 | Tool | Does |
 |------|------|
-| `run_js` | Bundles and runs code once in the VM; returns the result and console output. |
-| `define_tool` | Bundles a new or revised generated tool and saves it. With `test_args`, runs it first and saves only if that run succeeds. Refuses a name that matches a built-in. |
+| `run_js` | Runs code once in a child process; returns the result and the process's output. |
+| `define_tool` | Installs a new or revised generated tool's packages and saves it. With `test_args`, runs it first and saves only if that run succeeds. Refuses a name that matches a built-in. |
 | `read_tool` | Returns a generated tool's definition and source. |
 | `delete_tool` | Deletes a generated tool. |
 
@@ -68,14 +72,14 @@ for itself.
 A generated tool is an ES module whose default export is
 `async (args) => result`, with a name (`^[a-z][a-z0-9_]{0,63}$`), a description
 and a JSON Schema for its arguments. Defining a tool under an existing name
-replaces it and increments its revision. The bundle is fixed when the tool is
-saved: later changes to the dependency cache do not change it.
+replaces it and increments its revision. A tool imports packages from the
+shared `$SEVEN_HOME/node_modules`, so upgrading a package changes every tool that
+uses it.
 
 | File in `$SEVEN_HOME/tools/<name>/` | Contents |
 |-------------------------------------|----------|
-| `tool.json` | Name, description, parameter schema, requested dependency ranges, installed package versions, created and updated times, revision |
-| `source.ts` | The source as the model wrote it |
-| `bundle.js` | The self-contained module the VM runs |
+| `tool.json` | Name, description, parameter schema, requested dependency ranges, package versions installed when it was saved, created and updated times, revision |
+| `source.ts` | The source as the model wrote it, which the runner runs |
 
 ## Configuration
 
@@ -87,10 +91,11 @@ All configuration comes from environment variables; `npm start` and
 | `SEVEN_LLM_API_KEY` | `MISTRAL_API_KEY` | Mistral API key. Required to run the agent. |
 | `SEVEN_LLM_MODEL` | `mistral-medium-latest` | Any Mistral chat model with function calling. |
 | `SEVEN_LLM_ENDPOINT` | `https://api.mistral.ai/v1` | API base URL. |
-| `SEVEN_HOME` | `<workspace>/.seven` (`/data` in the image) | Generated tools and the dependency cache. |
-| `SEVEN_WORKSPACE` | current directory (`/workspace` in the image) | Where the VM's relative paths resolve. |
+| `SEVEN_HOME` | `<workspace>/.seven` (`/data` in the image) | Generated tools and the `node_modules` they import from. |
+| `SEVEN_WORKSPACE` | current directory (`/workspace` in the image) | The working directory of every run. |
 | `SEVEN_MAX_STEPS` | `40` | Model calls one user message may take. |
-| `SEVEN_RUN_TIMEOUT_MS` | `60000` | Wall-clock budget of one VM run. |
+| `SEVEN_RUN_TIMEOUT_MS` | `60000` | Wall-clock budget of one run. |
+| `SEVEN_RUN_MEMORY_MB` | `1024` | V8 heap cap of one run, in MiB. |
 
 ## Limits
 
