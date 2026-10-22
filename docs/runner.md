@@ -30,7 +30,7 @@ does not contain authority. Seven's isolation is its container (`docker.md`).
 |------|--------------|
 | Install | Every bare import that is not a Node built-in is an npm package. A missing one is installed with `npm install --ignore-scripts` into `$SEVEN_HOME/node_modules`; a syntax error is reported here, before any process starts. |
 | Spawn | `node --experimental-transform-types` starts in its own process group, with the workspace as its working directory, seven's environment, and a V8 heap cap. |
-| Call | The module is imported. A default export that is a function is called with the run's arguments and awaited; any other default export is the result; no default export gives `null`. |
+| Call | The module is imported. A default export that is a function is called with the run's arguments and awaited; any other default export is awaited and is the result; no default export gives `null`. |
 | Result | The result is JSON round-tripped back to the parent. A thrown error becomes `error`, with its stack. |
 | Teardown | The whole process group is killed with `SIGKILL` once the result arrives, so open timers, sockets, servers and child processes end with the run. |
 
@@ -48,6 +48,22 @@ A run's result:
 | `error` | The thrown error's stack, or a runner failure: syntax error, failed install, timeout, or a process that exited before returning. |
 | `logs` | stdout lines verbatim and stderr lines prefixed `[stderr] `, in arrival order, up to 1,000,000 characters. |
 | `durationMs` | Wall-clock time of the run, installs excluded. |
+
+## Run handles
+
+Starting a run returns a handle at once; the result arrives later. The agent
+uses handles for both kinds of tool call: a synchronous call awaits the
+handle's result, a background run keeps the handle in the run table.
+
+| Handle member | Meaning |
+|---------------|---------|
+| `done` | Resolves with the result when the run ends, however it ends. Never rejects. |
+| `state()` | `installing` (packages), `running` (the process), or `done`. |
+| `logs()` | The complete output lines so far. |
+| `kill()` | Kills the process group; the run fails with `killed`. A kill during installation cancels the run before a process starts. No effect once the result is in. |
+| `startedAt` | When the run was started. |
+
+When the seven process exits, every live run's process group is killed.
 
 ## Limits per run
 

@@ -2,9 +2,11 @@
 
 Seven is a single Node.js process: a CLI driving one agent loop, a Mistral
 client, a tool store on disk, and the runner that runs every piece of code the
-model writes in a child process. The agent starts with four built-in tools and grows by writing
-generated tools, which are saved to the tool store and offered to the model
-from the next step onward.
+model writes in a child process. The model calls a tool synchronously, waiting
+for its result, or asynchronously with `start_tool`, getting a run id it can
+check, wait on or kill. The agent starts with 9 built-in tools and grows by
+writing generated tools, which are saved to the tool store and offered to the
+model from the next step onward.
 
 ```text
             ┌────────── seven process ───────────┐
@@ -41,7 +43,9 @@ from the next step onward.
 
 1. The user's message is appended to the conversation.
 2. The system prompt is rebuilt, and the tool list is the built-ins plus every
-   generated tool in the store, re-read on every step.
+   generated tool in the store, re-read on every step. The prompt also lists
+   every background run that is still going or has finished without the model
+   looking at it.
 3. The model replies. A reply without tool calls is the answer and ends the turn.
 4. Each tool call runs in order. A built-in runs in the seven process and may
    use the runner; a generated tool runs its source in a child process with the
@@ -62,10 +66,33 @@ A turn that reaches `SEVEN_MAX_STEPS` model calls (default 40) ends with
 | `define_tool` | Installs a new or revised generated tool's packages and saves it. With `test_args`, runs it first and saves only if that run succeeds. Refuses a name that matches a built-in. |
 | `read_tool` | Returns a generated tool's definition and source. |
 | `delete_tool` | Deletes a generated tool. |
+| `start_tool` | Starts a generated tool or `run_js` as a background run and returns its run id at once. Takes an optional `timeout_ms`. |
+| `run_status` | Shows a background run: running or finished, its result once finished, and the last `tail` output lines (default 50). |
+| `wait_run` | Waits for a background run to finish, up to `timeout_ms` (default 30 s, at most 300 s), then shows its status. Waiting does not stop the run. |
+| `kill_run` | Kills a background run and its process group; the run fails with `killed`. |
+| `list_runs` | Lists background runs, one line each. |
 
-The built-ins are deliberately limited to running code and managing generated
-tools. Reading files, searching or editing are capabilities the agent writes
+The built-ins are deliberately limited to running code, managing generated
+tools, and controlling background runs. Reading files, searching or editing are capabilities the agent writes
 for itself.
+
+## Sync and async calls
+
+A direct tool call is synchronous: the loop waits for the run, up to its time
+limit, and the result is the tool message. `start_tool` makes the same call
+asynchronous: the run starts, the tool message is `started r<N> (<tool>)`, and
+the loop continues while the run's process keeps going.
+
+| Background run state | Shown as |
+|----------------------|----------|
+| Installing packages or running | `r3 fetch_all: running for 12.4s` |
+| Finished, not yet looked at | `r3 fetch_all: finished in 14.0s, ok (not checked yet)` |
+| Finished and looked at | `r3 fetch_all: finished in 14.0s, ok` |
+
+A finished run counts as looked at once `run_status`, `wait_run` or `kill_run`
+has shown it. Background runs belong to the seven process: they survive across
+turns, end when it exits, and are numbered from `r1` in each process. The 50
+most recently finished runs are kept.
 
 ## Generated tools
 
@@ -104,5 +131,7 @@ All configuration comes from environment variables; `npm start` and
 | No session persistence | The conversation lives in memory and ends with the process; only generated tools persist. |
 | No context management | The whole conversation is sent on every step; a long session eventually exceeds the model's context window and the API call fails. |
 | No streaming | Each model reply arrives whole. |
-| Sequential tool calls | Tool calls in one reply run one after another. |
+| Sequential tool calls | Tool calls in one reply run one after another; `start_tool` is how work overlaps. |
+| Background runs are not persisted | They live in the seven process's memory; a restart loses their ids, results and output. |
+| No push notification | The model learns that a background run finished from the system prompt at its next step, or by asking; nothing interrupts a step in progress. |
 | No self-modification of seven's own source | The agent extends itself through generated tools only; it does not edit `src/`. |

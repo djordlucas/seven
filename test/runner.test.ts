@@ -45,6 +45,10 @@ describe("results", () => {
     assert.equal(await value(`export default () => undefined`), null);
   });
 
+  it("awaits a default export that is a promise", async () => {
+    assert.equal(await value(`export default new Promise((r) => setTimeout(() => r("later"), 50))`), "later");
+  });
+
   it("runs TypeScript, including syntax that needs transforming", async () => {
     assert.equal(await value(`enum Color { Red = "red" } export default (): string => Color.Red`), "red");
   });
@@ -163,6 +167,60 @@ describe("process lifetime", () => {
       r.logs.some((l) => /heap out of memory/i.test(l)),
       r.logs.join("\n"),
     );
+  });
+});
+
+describe("run handles", () => {
+  const until = async (cond: () => boolean, ms = 5000) => {
+    const end = Date.now() + ms;
+    while (!cond()) {
+      if (Date.now() > end) throw new Error("condition not met in time");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+
+  it("returns at once and exposes output while the run is going", async () => {
+    const h = runner.startEval(
+      `console.log("first"); await new Promise((r) => setTimeout(r, 300)); console.log("second"); export default "end"`,
+    );
+    assert.notEqual(h.state(), "done");
+    await until(() => h.logs().includes("first"));
+    assert.equal(h.state(), "running");
+    assert.deepEqual(h.logs(), ["first"]);
+
+    const r = await h.done;
+    assert.equal(h.state(), "done");
+    assert.equal(r.value, "end");
+    assert.deepEqual(h.logs(), ["first", "second"]);
+  });
+
+  it("kills a running run and what it spawned", async () => {
+    const marker = `${20_000 + Math.floor(Math.random() * 1000)}.5`;
+    const h = runner.startEval(
+      `import { spawn } from "node:child_process"; spawn("sleep", ["${marker}"]); console.log("up"); setInterval(() => {}, 1000); export default new Promise(() => {})`,
+    );
+    await until(() => h.logs().includes("up"));
+    h.kill();
+    const r = await h.done;
+    assert.equal(r.error, "killed");
+    assert.deepEqual(r.logs, ["up"]);
+    await new Promise((res) => setTimeout(res, 200));
+    assert.equal(execSync(`pgrep -f "sleep ${marker}" || true`).toString().trim(), "");
+  });
+
+  it("cancels a run killed before its process starts", async () => {
+    const h = runner.startEval(`export default "never"`);
+    assert.equal(h.state(), "installing");
+    h.kill();
+    assert.deepEqual(await h.done, { ok: false, error: "killed", logs: [], durationMs: 0 });
+  });
+
+  it("ignores a kill after the run is done", async () => {
+    const h = runner.startEval(`export default 1`);
+    const r = await h.done;
+    h.kill();
+    assert.equal(r.value, 1);
+    assert.equal((await h.done).ok, true);
   });
 });
 

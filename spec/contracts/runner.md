@@ -12,7 +12,7 @@ users; this document is the version tests are written against.
 | R-RUN.2 | The child's working directory is the runner's `cwd`, and its environment is the seven process's environment. |
 | R-RUN.3 | The run file is under `home`, and `home` has a `package.json` with `"type": "module"`, so the file is an ES module that resolves packages from `home/node_modules`. |
 | R-RUN.4 | TypeScript is accepted, including syntax that requires transformation (enums, namespaces). |
-| R-RUN.5 | A default export that is a function is called once with the run's arguments (default `{}`) and awaited; any other default export is the result; no default export yields `null`. |
+| R-RUN.5 | A default export that is a function is called once with the run's arguments (default `{}`) and awaited; any other default export is awaited and is the result; no default export yields `null`. |
 | R-RUN.6 | The result is the JSON round-trip of the returned value; `undefined` becomes `null`. A value `JSON.stringify` rejects fails the run with that error. |
 | R-RUN.7 | A thrown or rejected error yields `ok: false` and `error` = the error's stack, or `Name: message` when there is none. |
 | R-RUN.8 | Before spawning, every bare, non-built-in import found statically or as a literal dynamic `import()`/`require()` is installed if missing, with install scripts disabled. A syntax error fails the run without spawning. |
@@ -23,6 +23,9 @@ users; this document is the version tests are written against.
 | R-RUN.13 | stdout and stderr are captured as lines in arrival order; stderr lines are prefixed `[stderr] `. Capture stops at 1,000,000 characters and a final line counts the lines dropped. |
 | R-RUN.14 | `seven.<m>.<f>(...args)` in the child calls host function `<m>.<f>` in the parent with JSON arguments and resolves with its JSON result. A failure, or a missing function, rejects with an `Error` whose message starts `seven.<m>.<f>: `. Neither `seven` nor `seven.<m>` is thenable. |
 | R-RUN.15 | The runner performs no permission checks. |
+| R-RUN.16 | Starting a run returns a handle before installation or spawning completes. `handle.logs()` returns the complete output lines captured so far. |
+| R-RUN.17 | `handle.kill()` before the result arrives kills the process group, or cancels the run before spawning if it is still installing; the run's result is `ok: false`, `error: "killed"`. After the result arrives it has no effect. |
+| R-RUN.18 | When the seven process exits, the process group of every run still alive is killed. |
 
 ## Limits
 

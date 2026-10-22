@@ -6,6 +6,7 @@ import type { Runner } from "../runner/index.ts";
 import type { ToolStore } from "../tools/store.ts";
 import { type Builtin, builtins, formatRun } from "./builtins.ts";
 import { systemPrompt } from "./prompt.ts";
+import { RunTable, summarize } from "./runs.ts";
 
 /** Longest tool result handed back to the model, in characters. */
 const MAX_RESULT_CHARS = 16_000;
@@ -26,12 +27,13 @@ export interface AgentOptions {
 
 export class Agent {
   readonly history: Message[] = [];
+  readonly runs = new RunTable();
   private readonly opts: AgentOptions;
   private readonly builtins: Map<string, Builtin>;
 
   constructor(opts: AgentOptions) {
     this.opts = opts;
-    this.builtins = new Map(builtins(opts.runner, opts.store).map((b) => [b.name, b]));
+    this.builtins = new Map(builtins(opts.runner, opts.store, this.runs).map((b) => [b.name, b]));
   }
 
   /** Handle one user message; resolves with the final answer. */
@@ -46,7 +48,14 @@ export class Agent {
         ...[...this.builtins.values()].map(({ name, description, parameters }) => ({ name, description, parameters })),
         ...own.map(({ name, description, parameters }) => ({ name, description, parameters })),
       ];
-      const system: Message = { role: "system", content: systemPrompt({ workspace: this.opts.workspace, tools: own }) };
+      const runs = this.runs
+        .list()
+        .filter((r) => !r.result || !r.checked)
+        .map((r) => summarize(r));
+      const system: Message = {
+        role: "system",
+        content: systemPrompt({ workspace: this.opts.workspace, tools: own, runs }),
+      };
 
       const { message } = await model.complete({ messages: [system, ...this.history], tools, signal });
       this.history.push(message);
