@@ -1,7 +1,7 @@
 node_modules/
 
-# seven's own state when run from the repo: generated tools and the
-# node_modules they import from (SEVEN_HOME, default ./.seven).
+# seven's own data when run from the repo: the state database, tool sources
+# and node_modules (<workspace>/.seven).
 /.seven/
 
 # The dev container's workspace (compose.yaml mounts it at /workspace).

@@ -18,7 +18,7 @@ export type { Package } from "./deps.ts";
 export { type HostFn, type HostModules, llmModule } from "./host.ts";
 
 export interface RunnerOptions {
-  /** $SEVEN_HOME: holds node_modules, and run files must live under it to resolve them. */
+  /** <workspace>/.seven: holds node_modules, and run files must live under it to resolve them. */
   home: string;
   /** The child's working directory; the agent's workspace. */
   cwd: string;
@@ -28,6 +28,8 @@ export interface RunnerOptions {
   timeoutMs?: number;
   /** V8 heap cap of one run, in MiB. */
   memoryMb?: number;
+  /** Variables added to the environment every run inherits from seven. */
+  env?: Record<string, string>;
 }
 
 export interface RunResult {
@@ -97,6 +99,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         host: opts.host ?? {},
         timeoutMs: timeoutMs ?? opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         memoryMb: opts.memoryMb ?? DEFAULT_MEMORY_MB,
+        env: { ...process.env, ...opts.env },
       }),
     startEval(source, { args, deps, timeoutMs } = {}) {
       // Installing comes first and can take a while, so the handle exists
@@ -153,6 +156,7 @@ interface ChildRun {
   host: HostModules;
   timeoutMs: number;
   memoryMb: number;
+  env: NodeJS.ProcessEnv;
 }
 
 function startChild(run: ChildRun): RunHandle {
@@ -168,7 +172,7 @@ function startChild(run: ChildRun): RunHandle {
     ],
     {
       cwd: run.cwd,
-      env: process.env,
+      env: run.env,
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       // Its own process group, so the whole group — including anything the
       // run spawned — can be killed at once.

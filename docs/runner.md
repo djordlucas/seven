@@ -11,9 +11,9 @@ does not contain authority. Seven's isolation is its container (`docker.md`).
 
 ```text
  source (TS/JS)
-     │  scan imports; npm install missing packages into $SEVEN_HOME/node_modules
+     │  scan imports; npm install missing packages into <workspace>/.seven/node_modules
      ▼
- file under $SEVEN_HOME (tool source, or a temporary file for run_js)
+ file under <workspace>/.seven (tool source, or a temporary file for run_js)
      │  spawn node (own process group, cwd = workspace)
      ▼
  ┌──────────── child process ──────────────┐
@@ -28,15 +28,15 @@ does not contain authority. Seven's isolation is its container (`docker.md`).
 
 | Step | What happens |
 |------|--------------|
-| Install | Every bare import that is not a Node built-in is an npm package. A missing one is installed with `npm install --ignore-scripts` into `$SEVEN_HOME/node_modules`; a syntax error is reported here, before any process starts. |
+| Install | Every bare import that is not a Node built-in is an npm package. A missing one is installed with `npm install --ignore-scripts` into `<workspace>/.seven/node_modules`; a syntax error is reported here, before any process starts. |
 | Spawn | `node --experimental-transform-types` starts in its own process group, with the workspace as its working directory, seven's environment, and a V8 heap cap. |
 | Call | The module is imported. A default export that is a function is called with the run's arguments and awaited; any other default export is awaited and is the result; no default export gives `null`. |
 | Result | The result is JSON round-tripped back to the parent. A thrown error becomes `error`, with its stack. |
 | Teardown | The whole process group is killed with `SIGKILL` once the result arrives, so open timers, sockets, servers and child processes end with the run. |
 
-Run files live under `$SEVEN_HOME`, which holds a `package.json` with
+Run files live under `<workspace>/.seven`, which holds a `package.json` with
 `"type": "module"`, so `.ts` files are ES modules and resolve packages from
-`$SEVEN_HOME/node_modules`. TypeScript is transformed by Node itself, so syntax
+`<workspace>/.seven/node_modules`. TypeScript is transformed by Node itself, so syntax
 that is not just type annotations (enums, namespaces) works.
 
 A run's result:
@@ -84,6 +84,9 @@ failure rejects with an `Error` whose message starts `seven.<module>.<fn>: `.
 |----------|---------|------|
 | `seven.llm.chat(prompt, system?)` → string | Agent runs | One call to the model the agent runs on, without tools |
 
+`seven.db(path)` is the exception: it runs in the child, synchronously, and
+returns a `node:sqlite` `DatabaseSync` on a workspace file (`data.md`).
+
 A program embedding the runner adds modules through the `host` option of
 `createRunner`: `{ name: { fn } }` becomes `seven.name.fn`.
 
@@ -104,4 +107,4 @@ a literal specifier.
 | Computed imports are not installed | `import(name)` with a non-literal specifier fails with `ERR_MODULE_NOT_FOUND` unless the package is already installed. |
 | Process startup per run | Each run starts a Node process, about 90 ms before the module's own load time. |
 | Escaping the process group | A grandchild that starts its own session (`setsid`, `detached: true`) survives the run. |
-| Concurrent npm installs queue | Installs are serialised within one seven process; two processes sharing one `$SEVEN_HOME` can race. |
+| Concurrent npm installs queue | Installs are serialised within one seven process; two seven processes in one workspace can race. |

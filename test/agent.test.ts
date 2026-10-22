@@ -1,42 +1,18 @@
 import assert from "node:assert/strict";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import { describe, it } from "node:test";
-import { Agent } from "../src/agent/agent.ts";
-import type { ChatModel, Completion, Message, ToolDef } from "../src/llm/mistral.ts";
-import { createRunner } from "../src/runner/index.ts";
-import { ToolStore } from "../src/tools/store.ts";
+import { after, describe, it } from "node:test";
+import { call, type Harness, harness, type Reply } from "./helpers.ts";
 
-/** A model that plays back fixed replies and records what it was shown. */
-class ScriptedModel implements ChatModel {
-  readonly seen: { messages: Message[]; tools: ToolDef[] }[] = [];
-  private readonly replies: Completion["message"][];
-
-  constructor(replies: Completion["message"][]) {
-    this.replies = replies;
-  }
-
-  async complete(req: { messages: Message[]; tools?: ToolDef[] }): Promise<Completion> {
-    this.seen.push({ messages: structuredClone(req.messages), tools: req.tools ?? [] });
-    const message = this.replies.shift();
-    if (!message) throw new Error("script exhausted");
-    return { message };
-  }
-}
-
-const call = (id: string, name: string, args: unknown) => ({
-  role: "assistant" as const,
-  content: null,
-  tool_calls: [{ id, type: "function" as const, function: { name, arguments: JSON.stringify(args) } }],
+const open: Harness[] = [];
+after(async () => {
+  for (const h of open) await h.close();
 });
 
-function setup(replies: Completion["message"][]) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "seven-agent-test-"));
-  const store = new ToolStore(path.join(home, "tools"));
-  const runner = createRunner({ home, cwd: home });
-  const model = new ScriptedModel(replies);
-  return { store, model, agent: new Agent({ model, runner, store, workspace: home, maxSteps: 10 }) };
+/** One root agent with a script; `agent.send` runs a turn. */
+function setup(replies: Reply[]) {
+  const h = harness({ seven: replies });
+  open.push(h);
+  const agent = { send: (text: string) => h.supervisor.root().turn({ text }) };
+  return { agent, model: h.model, store: h.store };
 }
 
 describe("agent", () => {
@@ -178,7 +154,7 @@ describe("agent", () => {
       name: "flaky",
       description: "Fails on odd input.",
       parameters: { type: "object" },
-      code: "export default ({ n }: { n: number }) => { if (n % 2) throw new Error(`odd ${n}`); return n }",
+      code: "export default ({ n }: { n: number }) => { if (n % 2) throw new Error('odd ' + n); return n }",
     };
     const { agent, model, store } = setup([
       call("i1", "define_tool", flaky),
@@ -201,7 +177,7 @@ describe("agent", () => {
     );
     const report = String(model.seen.at(-1)?.messages.at(-1)?.content);
     assert.match(report, /^flaky \(revision 1\): enabled\nrun limit: default\nlast 3 runs: 2 ok, 1 failed; median /);
-    assert.match(report, /\n- \S+ r1 sync \d+\.\ds failed: Error: odd 3\n/);
+    assert.match(report, /\n- \S+ r1 seven sync \d+\.\ds failed: Error: odd 3\n/);
   });
 
   it("disables a tool: hidden, refused, named in the prompt, then re-enabled", async () => {

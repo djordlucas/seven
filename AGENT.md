@@ -19,13 +19,22 @@ on `main`**. If you hit that block, you are on `main` — branch and retry.
 
 ## Architecture at a glance
 
-Seven is one Node.js process. There is no daemon and no persistence beyond files:
+Seven is one Node.js process running many agents, with all state in one
+SQLite file:
 
-- The **CLI** (`src/main.ts`) runs one **agent loop** (`src/agent`) per process.
-- The loop calls **Mistral** (`src/llm/mistral.ts`) with the built-in tools plus
-  every **generated tool** in the **tool store** (`src/tools/store.ts`,
-  `$SEVEN_HOME/tools/`). The store is re-read every model step, so a tool the
-  agent defines is callable on its next step.
+- The **CLI** (`src/main.ts`) wires everything through `src/app.ts` and holds
+  the workspace's **lease**; only one process runs agents per workspace.
+- The **supervisor** (`src/agent/supervisor.ts`) runs every **agent**'s loop
+  (`src/agent/agent.ts`) concurrently, driving them from their **inboxes**.
+  `docs/multi-agent.md` has the modes and messaging.
+- Every agent calls **Mistral** (`src/llm/mistral.ts`) through one client
+  capped at `SEVEN_LLM_CONCURRENCY` calls (`src/llm/limit.ts`), with the
+  built-ins (`src/agent/builtins/`) plus every **generated tool** in the
+  **tool store** (`src/tools/store.ts`). The store is read every model step, so
+  a tool any agent defines is callable by all on their next step.
+- **State** — agents, conversations, inboxes, tools, runs, the lease — is
+  `<workspace>/.seven/seven.db` (`src/state/db.ts`, `node:sqlite`). All data
+  lives in the workspace (`docs/data.md`).
 - Built-in and generated code runs in the **runner** (`src/runner`): one Node.js
   child process per run, killed with its process group when the result is back,
   with all of Node and npm available. The runner has **no permission model** by

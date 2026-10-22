@@ -1,7 +1,10 @@
 # Development and local runs. See docs/docker.md.
 #
 #   docker compose run --rm dev            shell in the toolchain, repo at /app
-#   docker compose run --rm seven          the agent, interactive
+#   docker compose run --rm seven          the root agent, interactive
+#   docker compose up -d seven-serve       every agent, in the background
+#
+# All of seven's data lives in ./workspace, mounted at /workspace.
 #
 # Both read .env when it exists.
 
@@ -30,7 +33,6 @@ services:
       target: runtime
     image: seven:latest
     volumes:
-      - seven-data:/data
       - ./workspace:/workspace
     env_file:
       - path: .env
@@ -38,6 +40,16 @@ services:
     stdin_open: true
     tty: true
 
+  seven-serve:
+    image: seven:latest
+    command: ["serve"]
+    volumes:
+      - ./workspace:/workspace
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    profiles: ["serve"]
+
 volumes:
   dev-node-modules:
-  seven-data:
