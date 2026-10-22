@@ -7,6 +7,7 @@
 // in another process reach an agent.
 
 import type { ChatModel } from "../llm/mistral.ts";
+import { type Logger, noopLogger, preview } from "../log.ts";
 import type { Runner } from "../runner/index.ts";
 import { type AgentMode, type AgentRow, type InboxRow, ROOT_ID, type State, TERMINAL } from "../state/db.ts";
 import type { ToolStore } from "../tools/store.ts";
@@ -45,6 +46,7 @@ export interface SupervisorOptions {
   /** Agents other than the root that may be running or idle at once. */
   maxAgents: number;
   onEvent?: (e: SupervisorEvent) => void;
+  log?: Logger;
 }
 
 export class Supervisor {
@@ -54,10 +56,12 @@ export class Supervisor {
   private readonly retryAt = new Map<string, number>();
   private timer?: NodeJS.Timeout;
   private closed = false;
+  private readonly log: Logger;
 
   constructor(opts: SupervisorOptions) {
     this.opts = opts;
-    this.runs = new RunTable(opts.state);
+    this.log = (opts.log ?? noopLogger).child({ component: "supervisor" });
+    this.runs = new RunTable(opts.state, opts.log ?? noopLogger);
   }
 
   /** The root agent: the one the user talks to. The state database creates it. */
@@ -71,11 +75,14 @@ export class Supervisor {
    */
   start(): void {
     const { state } = this.opts;
-    state.markLostRuns();
-    for (const row of state.listAgents()) {
-      if (TERMINAL.includes(row.status)) continue;
-      this.agent(row.id)?.repair();
-    }
+    const lost = state.markLostRuns();
+    if (lost > 0) this.log.warn("background runs lost in a restart", { count: lost });
+    const active = state.listAgents().filter((r) => !TERMINAL.includes(r.status));
+    for (const row of active) this.agent(row.id)?.repair();
+    this.log.info("supervisor started", {
+      agents: active.map((r) => `${r.id}:${r.mode}:${r.status}`),
+      max_agents: this.opts.maxAgents,
+    });
     this.timer = setInterval(() => this.tick(), POLL_MS);
     this.tick();
   }
@@ -84,6 +91,8 @@ export class Supervisor {
   async shutdown(): Promise<void> {
     this.closed = true;
     clearInterval(this.timer);
+    const busy = [...this.agents.values()].filter((a) => a.busy).map((a) => a.id);
+    this.log.info("supervisor stopping", { interrupting: busy });
     for (const a of this.agents.values()) a.interrupt();
     await this.runs.shutdown();
     const deadline = Date.now() + 5000;
@@ -93,7 +102,33 @@ export class Supervisor {
   // ── what agents call ──────────────────────────────────────────────────────
 
   spawn(parent: string, spec: SpawnSpec): AgentRow | string {
-    const { state, maxAgents } = this.opts;
+    const refused = this.checkSpawn(spec);
+    if (refused) {
+      this.log.warn("spawn refused", { parent, name: spec.name, mode: spec.mode, reason: refused });
+      return refused;
+    }
+    const { state } = this.opts;
+    const name = spec.name.trim();
+    const row = state.tx(() => {
+      const r = state.createAgent({ ...spec, name, parent, mode: spec.mode });
+      for (const text of spec.tasks) state.enqueue(r.id, { sender: parent, kind: "task", text });
+      return r;
+    });
+    this.log.info("agent spawned", {
+      agent: row.id,
+      parent,
+      name,
+      mode: row.mode,
+      tasks: spec.tasks.length,
+      ...(row.intervalS && { interval_s: row.intervalS }),
+    });
+    this.emit({ type: "spawned", agent: row.id, parent, name, mode: row.mode });
+    this.tick();
+    return row;
+  }
+
+  private checkSpawn(spec: SpawnSpec): string | undefined {
+    const { maxAgents } = this.opts;
     const name = spec.name.trim();
     if (!name) return "name is required";
     if (!["request", "sequence", "continuous"].includes(spec.mode)) return `unknown mode "${spec.mode}"`;
@@ -104,15 +139,7 @@ export class Supervisor {
     if (active.some((a) => a.name === name)) return `an active agent is already named "${name}"`;
     if (active.length >= maxAgents)
       return `${active.length} agents are already active, the most allowed (SEVEN_MAX_AGENTS)`;
-
-    const row = state.tx(() => {
-      const r = state.createAgent({ ...spec, name, parent, mode: spec.mode });
-      for (const text of spec.tasks) state.enqueue(r.id, { sender: parent, kind: "task", text });
-      return r;
-    });
-    this.emit({ type: "spawned", agent: row.id, parent, name, mode: row.mode });
-    this.tick();
-    return row;
+    return undefined;
   }
 
   /** Agents, oldest first; active ones only unless `all`. */
@@ -150,7 +177,8 @@ export class Supervisor {
       const result = to.result ? `; its result: ${to.result.slice(0, 500)}` : "";
       return `${to.id} "${to.name}" is ${to.status} and reads no more messages${result}`;
     }
-    this.opts.state.enqueue(to.id, { sender: from, kind: "message", text });
+    const inboxId = this.opts.state.enqueue(to.id, { sender: from, kind: "message", text });
+    this.log.info("message sent", { from, to: to.id, inbox_id: inboxId, chars: text.length });
     this.emit({ type: "message", from, to: to.id, text });
     this.tick();
     return `sent to ${to.id} "${to.name}"`;
@@ -217,8 +245,9 @@ export class Supervisor {
     let a = this.agents.get(id);
     if (!a && this.opts.state.getAgent(id)) {
       const { state, store, runner, model, workspace, maxSteps, onEvent } = this.opts;
+      const log = (this.opts.log ?? noopLogger).child({ agent: id });
       a = new Agent(
-        { state, store, runner, runs: this.runs, model, supervisor: this, workspace, maxSteps, onEvent },
+        { state, store, runner, runs: this.runs, model, supervisor: this, workspace, maxSteps, onEvent, log },
         id,
       );
       this.agents.set(id, a);
@@ -231,7 +260,9 @@ export class Supervisor {
     for (const row of this.opts.state.listAgents()) {
       if (row.id === ROOT || TERMINAL.includes(row.status)) continue;
       const a = this.agent(row.id);
-      if (a && !a.busy) void this.drive(a, row);
+      if (a && !a.busy) {
+        this.drive(a, row).catch((err) => this.log.error("driving an agent failed", { agent: row.id, error: err }));
+      }
     }
   }
 
@@ -240,17 +271,20 @@ export class Supervisor {
     const { state } = this.opts;
     if ((this.retryAt.get(a.id) ?? 0) > Date.now()) return;
 
-    let input: { text: string; inboxId?: number } | undefined;
+    let input: Parameters<Agent["turn"]>[0];
     if (!a.needsResume()) {
       const next = row.mode === "continuous" ? state.pending(a.id)[0] : state.pending(a.id, { kind: "task" })[0];
       if (next) {
-        input = { text: next.kind === "task" ? next.text : this.formatInbox(next), inboxId: next.id };
+        input =
+          next.kind === "task"
+            ? { text: next.text, inboxId: next.id, kind: "task" }
+            : { text: this.formatInbox(next), inboxId: next.id, kind: "message" };
       } else if (row.mode === "continuous") {
         if (!row.intervalS || !due(row)) {
           if (row.status !== "idle") state.updateAgent(a.id, { status: "idle" });
           return;
         }
-        input = { text: "[scheduled wake-up] Continue with your standing instructions." };
+        input = { text: "[scheduled wake-up] Continue with your standing instructions.", kind: "wake" };
       } else {
         // A request or sequence agent with no task left is done.
         this.end(row, "done", a.lastAnswer() ?? "");
@@ -271,6 +305,11 @@ export class Supervisor {
       if (row.mode === "continuous") {
         state.updateAgent(a.id, { status: "idle", error: message });
         this.retryAt.set(a.id, Date.now() + RETRY_MS);
+        this.log.warn("continuous agent's turn failed; retrying later", {
+          agent: a.id,
+          error: preview(message, 300),
+          retry_in_ms: RETRY_MS,
+        });
       } else {
         this.end(current, "failed", message);
       }
@@ -289,6 +328,12 @@ export class Supervisor {
       status,
       finishedAt: new Date().toISOString(),
       ...(status === "done" ? { result: detail } : { error: detail }),
+    });
+    this.log[status === "failed" ? "error" : "info"]("agent ended", {
+      agent: row.id,
+      status,
+      mode: row.mode,
+      detail: preview(detail, 300),
     });
     if (row.parent) {
       const head = status === "done" ? "finished" : status;

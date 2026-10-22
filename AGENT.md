@@ -52,6 +52,11 @@ precisely; see `docs/glossary.md`.
   uses what it is told exists — and the host function table in
   `docs/runner.md`. Most capabilities need none of this: a run already has all
   of Node.
+- **Logging is part of a component.** Take a `Logger` (`src/log.ts`), narrow it
+  with `child()` to what you are working on (agent, turn, run…), log each
+  state change at `info`, failures at `warn`/`error`, and content only at
+  `debug` through `preview()`. Never log the API key. A new `msg` goes in the
+  catalogue in `docs/logging.md`.
 - **`docs/` and `spec/` are the source of truth.** They hold the intended
   behavior; treat a code/doc mismatch as a bug to reconcile, not a doc to
   quietly follow. They ship in the runtime image, where the agent can read them.

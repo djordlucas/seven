@@ -1,6 +1,7 @@
 // What every built-in gets: the agent calling it and the shared machinery.
 
 import type { ToolDef } from "../../llm/mistral.ts";
+import type { Logger } from "../../log.ts";
 import type { RunHandle, Runner, RunResult } from "../../runner/index.ts";
 import type { StoredTool, ToolStore } from "../../tools/store.ts";
 import type { RunTable } from "../runs.ts";
@@ -22,6 +23,8 @@ export interface BuiltinContext {
   stateDb: string;
   /** Aborted when the calling agent is stopped. */
   signal?: AbortSignal;
+  /** Bound to the calling agent, turn, step and tool call. */
+  log: Logger;
 }
 
 export const depsSchema = {
@@ -38,7 +41,12 @@ export function startGenerated(
   mode: "sync" | "async",
   timeoutMs?: number,
 ): RunHandle {
-  const handle = ctx.runner.startFile(tool.file, args, timeoutMs ?? tool.meta.timeoutMs);
+  const handle = ctx.runner.startFile(
+    tool.file,
+    args,
+    timeoutMs ?? tool.meta.timeoutMs,
+    ctx.log.child({ tool: tool.meta.name, revision: tool.meta.revision, mode }),
+  );
   void handle.done.then(
     (r) =>
       ctx.store.isOpen &&

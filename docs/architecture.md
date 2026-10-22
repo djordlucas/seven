@@ -27,13 +27,14 @@ from its next step onward.
 
 | Component | Responsibility |
 |-----------|----------------|
-| CLI | Reads configuration, holds the lease, and runs the root agent interactively (`seven`), for one message (`seven "<message>"`), or runs every agent headless (`seven serve`). `seven agents`, `seven send` and `seven tools` read and write the state database without running agents. Agent activity is echoed to stderr. |
+| CLI | Reads configuration, holds the lease, and runs the root agent interactively (`seven`), for one message (`seven "<message>"`), or runs every agent headless (`seven serve`). `seven agents`, `seven send`, `seven tools` and `seven logs` read the state database or the log without running agents. Agent activity is echoed to stderr. |
 | Supervisor | Runs every agent's loop concurrently: resumes unfinished agents at start, starts a turn for each idle agent with work in its inbox (polled every 250 ms), ends request and sequence agents when their tasks are done, and tells parents when children end (`multi-agent.md`). |
 | Agent loop | One per agent. Sends the agent's conversation and the current tool list to the model, runs every tool call in the reply, appends the results, and repeats until a reply has no tool calls or the step budget runs out. Every message is written to the state database as it is produced. |
 | Model client | One non-streamed Mistral chat completion per step, with function tools. Retries 429 and 5xx responses with backoff, honouring `retry-after`. Shared by all agents, with at most `SEVEN_LLM_CONCURRENCY` calls in flight. |
 | State database | `<workspace>/.seven/seven.db`: agents, conversations, inboxes, tools, tool runs, background runs, the lease (`data.md`). |
 | Tool store | Generated tools, as rows in the state database; each revision's source is also written to `.seven/tools/<name>/r<revision>.ts` for the runner to import. |
 | Runner | Installs the npm packages source imports and runs it in a fresh Node.js child process per run (`runner.md`). |
+| Logger | Structured JSON lines from every component, bound to the agent, turn, step, call and run they belong to (`logging.md`). |
 
 ## A turn
 
@@ -139,6 +140,7 @@ All configuration comes from environment variables; `npm start` and
 | `SEVEN_RUN_MEMORY_MB` | `1024` | V8 heap cap of one run, in MiB. |
 | `SEVEN_MAX_AGENTS` | `16` | Agents besides the root that may be active at once. |
 | `SEVEN_LLM_CONCURRENCY` | `4` | Model calls in flight at once, across all agents. |
+| `SEVEN_LOG_LEVEL`, `SEVEN_LOG_FILE`, `SEVEN_LOG_STDERR` | `info`, `.seven/logs/seven.log`, on for `serve` | Logging (`logging.md`). |
 
 ## Limits
 

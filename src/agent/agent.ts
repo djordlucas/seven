@@ -2,7 +2,9 @@
 // answers without calling one. Its conversation lives in the state database,
 // one row per message, so a turn cut off by a restart resumes where it stopped.
 
+import { randomUUID } from "node:crypto";
 import type { ChatModel, Message, ToolCall, ToolDef } from "../llm/mistral.ts";
+import { type Logger, preview } from "../log.ts";
 import type { Runner } from "../runner/index.ts";
 import type { AgentRow, State } from "../state/db.ts";
 import type { ToolStore } from "../tools/store.ts";
@@ -28,8 +30,13 @@ export interface AgentDeps {
   supervisor: Supervisor;
   workspace: string;
   maxSteps: number;
+  /** Bound to this agent. */
+  log: Logger;
   onEvent?: (e: AgentEvent) => void;
 }
+
+/** Where a turn's input came from, for logs. */
+export type InputKind = "user" | "task" | "message" | "wake";
 
 export class Agent {
   readonly id: string;
@@ -71,8 +78,11 @@ export class Agent {
     const answered = new Set(
       history.slice(lastAssistant + 1).flatMap((m) => (m.role === "tool" ? [m.tool_call_id] : [])),
     );
-    for (const c of calls) {
-      if (answered.has(c.id)) continue;
+    const cut = calls.filter((c) => !answered.has(c.id));
+    if (cut.length > 0) {
+      this.deps.log.warn("interrupted tool calls closed", { tools: cut.map((c) => c.function.name) });
+    }
+    for (const c of cut) {
       this.append({
         role: "tool",
         tool_call_id: c.id,
@@ -92,11 +102,19 @@ export class Agent {
    * delivered in the same transaction); without, the turn resumes an
    * unanswered conversation. Resolves with the final answer.
    */
-  async turn(input?: { text: string; inboxId?: number }): Promise<string> {
+  async turn(input?: { text: string; inboxId?: number; kind?: InputKind }): Promise<string> {
     if (this.turning) throw new Error(`agent ${this.id} is already in a turn`);
     this.turning = true;
     this.abort = new AbortController();
     const { state, model } = this.deps;
+    const log = this.deps.log.child({ turn: randomUUID().slice(0, 8) });
+    const started = performance.now();
+    let steps = 0;
+    log.info("turn started", {
+      input: input ? (input.kind ?? "user") : "resume",
+      ...(input?.inboxId !== undefined && { inbox_id: input.inboxId }),
+      ...(log.enabled("debug") && input && { text: preview(input.text) }),
+    });
     try {
       state.updateAgent(this.id, { status: "running" });
       if (input) {
@@ -108,30 +126,50 @@ export class Agent {
 
       const maxSteps = this.row().maxSteps ?? this.deps.maxSteps;
       for (let step = 0; step < maxSteps; step++) {
-        this.deliverMessages();
+        steps = step + 1;
+        const stepLog = log.child({ step: steps });
+        this.deliverMessages(stepLog);
         const { tools, system } = this.context();
         const { message } = await model.complete({
           messages: [system, ...state.history(this.id)],
           tools,
           signal: this.abort.signal,
+          log: stepLog,
         });
         this.append(message);
 
         if (!message.tool_calls?.length) {
           const answer = message.content ?? "";
+          log.info("turn finished", {
+            outcome: "answered",
+            steps,
+            duration_ms: Math.round(performance.now() - started),
+            answer_chars: answer.length,
+            ...(log.enabled("debug") && { answer: preview(answer) }),
+          });
           this.emit({ type: "answer", agent: this.id, text: answer });
           return answer;
         }
         for (const call of message.tool_calls) {
-          const result = truncate(await this.dispatch(call));
+          const result = truncate(await this.dispatch(call, stepLog));
           this.append({ role: "tool", tool_call_id: call.id, name: call.function.name, content: result });
         }
       }
 
       const stopped = `Stopped after ${maxSteps} steps without a final answer.`;
+      log.warn("turn finished", { outcome: "max_steps", steps, duration_ms: Math.round(performance.now() - started) });
       this.append({ role: "assistant", content: stopped });
       this.emit({ type: "answer", agent: this.id, text: stopped });
       return stopped;
+    } catch (err) {
+      const aborted = this.abort?.signal.aborted ?? false;
+      log[aborted ? "info" : "error"]("turn ended early", {
+        outcome: aborted ? "interrupted" : "error",
+        steps,
+        duration_ms: Math.round(performance.now() - started),
+        ...(!aborted && { error: err }),
+      });
+      throw err;
     } finally {
       this.turning = false;
       this.abort = undefined;
@@ -150,13 +188,14 @@ export class Agent {
   }
 
   /** Messages from other agents (or the user) that arrived since the last step join the conversation now. */
-  private deliverMessages(): void {
+  private deliverMessages(log: Logger): void {
     const { state, supervisor } = this.deps;
     for (const m of state.pending(this.id, { kind: "message" })) {
       state.tx(() => {
         this.append({ role: "user", content: supervisor.formatInbox(m) });
         state.markDelivered(m.id);
       });
+      log.info("message delivered", { from: m.sender, inbox_id: m.id, chars: m.text.length });
     }
   }
 
@@ -181,32 +220,51 @@ export class Agent {
     return { tools, system: { role: "system", content } };
   }
 
-  private async dispatch(call: ToolCall): Promise<string> {
+  private async dispatch(call: ToolCall, stepLog: Logger): Promise<string> {
     const { name, arguments: raw } = call.function;
+    const log = stepLog.child({ call: call.id });
     this.emit({ type: "tool_call", agent: this.id, name, args: raw });
+    const started = performance.now();
 
     let result: string;
+    let kind: "builtin" | "generated" | "unknown" = "unknown";
     try {
       const args = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
       const builtin = builtins().get(name);
       const own = builtin ? undefined : this.deps.store.get(name);
-      if (builtin) result = await builtin.run(args, this.builtinContext());
-      else if (own?.meta.disabled) result = disabledError(own);
-      else if (own) {
-        const ctx = this.builtinContext();
+      if (builtin) {
+        kind = "builtin";
+        result = await builtin.run(args, this.builtinContext(log));
+      } else if (own?.meta.disabled) {
+        kind = "generated";
+        result = disabledError(own);
+      } else if (own) {
+        kind = "generated";
+        const ctx = this.builtinContext(log);
         result = formatRun(await awaitRun(startGenerated(ctx, own, args, "sync"), ctx.signal));
       } else result = `error: no tool named "${name}"`;
     } catch (err) {
       result = `error: ${err instanceof Error ? err.message : String(err)}`;
     }
 
+    const failed = result.startsWith("error:") || result.startsWith("not saved:");
+    log[failed ? "warn" : "info"]("tool called", {
+      tool: name,
+      kind,
+      ok: !failed,
+      duration_ms: Math.round(performance.now() - started),
+      result_chars: result.length,
+      ...(failed && { error: preview(result, 300) }),
+      ...(log.enabled("debug") && { args: preview(raw), result: preview(result) }),
+    });
     this.emit({ type: "tool_result", agent: this.id, name, result });
     return result;
   }
 
-  private builtinContext(): BuiltinContext {
+  private builtinContext(log: Logger): BuiltinContext {
     const { runner, store, runs, supervisor, workspace, state } = this.deps;
     return {
+      log,
       agentId: this.id,
       runner,
       store,

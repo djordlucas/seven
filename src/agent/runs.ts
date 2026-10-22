@@ -3,6 +3,7 @@
 // the process; the live handle exists only in the process that started it. A
 // run still going when that process exits is marked lost at the next start.
 
+import type { Logger } from "../log.ts";
 import type { RunHandle } from "../runner/index.ts";
 import type { RunRow, State } from "../state/db.ts";
 
@@ -13,16 +14,29 @@ export class RunTable {
   private readonly state: State;
   private readonly handles = new Map<string, RunHandle>();
   private closed = false;
+  private readonly log: Logger;
 
-  constructor(state: State) {
+  constructor(state: State, log: Logger) {
     this.state = state;
+    this.log = log.child({ component: "runs" });
   }
 
   add(agent: string, tool: string, handle: RunHandle): string {
     const id = this.state.insertRun(agent, tool);
     this.handles.set(id, handle);
+    this.log.info("background run started", { run: id, run_id: handle.id, agent, tool });
     void handle.done.then((r) => {
       this.handles.delete(id);
+      if (!this.closed) {
+        this.log.info("background run finished", {
+          run: id,
+          run_id: handle.id,
+          agent,
+          tool,
+          ok: r.ok,
+          duration_ms: r.durationMs,
+        });
+      }
       // A run killed by shutdown was already marked lost.
       if (!this.closed && this.state.isOpen) this.state.finishRun(id, { ...r, logs: r.logs.slice(-KEEP_LOG_LINES) });
     });
@@ -60,6 +74,7 @@ export class RunTable {
   async shutdown(): Promise<void> {
     this.closed = true;
     const live = [...this.handles.values()];
+    if (live.length > 0) this.log.warn("killing background runs at shutdown", { count: live.length });
     for (const h of live) h.kill();
     this.state.markLostRuns();
     await Promise.all(live.map((h) => h.done));

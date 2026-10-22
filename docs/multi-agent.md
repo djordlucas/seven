@@ -87,6 +87,7 @@ wait. Tool runs are separate child processes, so they execute in parallel.
 | `seven serve` | Runs every agent without a terminal until SIGINT or SIGTERM. |
 | `seven agents [--all]` | Lists agents, with the number of inbox items waiting. Does not run agents. |
 | `seven send <agent> <text>` | Queues a message from the user for an active agent. Does not run agents; works while another seven runs them. |
+| `seven logs [--agent <id>] [-f] …` | Prints the log, filtered; follows it with `-f` (`logging.md`). |
 
 Only one process at a time runs agents in a workspace. It holds a lease in the
 state database, renewed every 5 s; a second `seven`, `seven "<message>"` or

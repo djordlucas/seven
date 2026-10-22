@@ -1,6 +1,8 @@
 // A client for Mistral's chat completions API, trimmed to what the agent loop
 // uses: messages, function tools, one non-streamed reply.
 
+import { type Logger, noopLogger, preview } from "../log.ts";
+
 export type Message =
   | { role: "system" | "user"; content: string }
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
@@ -31,13 +33,17 @@ export interface Completion {
   finishReason?: string;
 }
 
+export interface CompletionRequest {
+  messages: Message[];
+  tools?: ToolDef[];
+  maxTokens?: number;
+  signal?: AbortSignal;
+  /** The caller's logger (its agent, turn and step), for this call's lines. */
+  log?: Logger;
+}
+
 export interface ChatModel {
-  complete(req: {
-    messages: Message[];
-    tools?: ToolDef[];
-    maxTokens?: number;
-    signal?: AbortSignal;
-  }): Promise<Completion>;
+  complete(req: CompletionRequest): Promise<Completion>;
 }
 
 export interface MistralOptions {
@@ -62,12 +68,8 @@ export class Mistral implements ChatModel {
     tools = [],
     maxTokens,
     signal,
-  }: {
-    messages: Message[];
-    tools?: ToolDef[];
-    maxTokens?: number;
-    signal?: AbortSignal;
-  }): Promise<Completion> {
+    log = noopLogger,
+  }: CompletionRequest): Promise<Completion> {
     const body = JSON.stringify({
       model: this.opts.model,
       messages,
@@ -78,23 +80,58 @@ export class Mistral implements ChatModel {
       ...(maxTokens && { max_tokens: maxTokens }),
     });
 
-    for (let attempt = 1; ; attempt++) {
-      const res = await fetch(`${this.opts.endpoint}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${this.opts.apiKey}` },
-        body,
-        signal,
-      });
+    log.debug("model request", {
+      model: this.opts.model,
+      messages: messages.length,
+      tools: tools.length,
+      request_bytes: body.length,
+      last_message: preview(lastContent(messages)),
+    });
 
-      if (res.ok) return parseCompletion((await res.json()) as RawCompletion);
+    for (let attempt = 1; ; attempt++) {
+      const started = performance.now();
+      let res: Response;
+      try {
+        res = await fetch(`${this.opts.endpoint}/chat/completions`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${this.opts.apiKey}` },
+          body,
+          signal,
+        });
+      } catch (err) {
+        if (signal?.aborted) log.debug("model call aborted", { attempt });
+        else log.error("model call failed", { attempt, error: err });
+        throw err;
+      }
+      const ms = Math.round(performance.now() - started);
+
+      if (res.ok) {
+        const out = parseCompletion((await res.json()) as RawCompletion);
+        log.info("model replied", {
+          model: this.opts.model,
+          duration_ms: ms,
+          attempt,
+          finish_reason: out.finishReason,
+          tool_calls: out.message.tool_calls?.map((c) => c.function.name),
+          prompt_tokens: out.usage?.prompt_tokens,
+          completion_tokens: out.usage?.completion_tokens,
+        });
+        if (log.enabled("debug") && out.message.content) {
+          log.debug("model reply content", { content: preview(out.message.content) });
+        }
+        return out;
+      }
 
       const retryable = res.status === 429 || res.status >= 500;
       const text = await res.text();
       if (!retryable || attempt >= this.opts.maxAttempts) {
+        log.error("model call failed", { status: res.status, attempt, duration_ms: ms, body: preview(text) });
         throw new Error(`mistral: ${res.status} ${res.statusText}: ${text.slice(0, 500)}`);
       }
       const after = Number(res.headers.get("retry-after"));
-      await sleep(Number.isFinite(after) && after > 0 ? after * 1000 : 1000 * 2 ** (attempt - 1), signal);
+      const delay = Number.isFinite(after) && after > 0 ? after * 1000 : 1000 * 2 ** (attempt - 1);
+      log.warn("model call retried", { status: res.status, attempt, delay_ms: delay, duration_ms: ms });
+      await sleep(delay, signal);
     }
   }
 }
@@ -141,6 +178,11 @@ function parseCompletion(raw: RawCompletion): Completion {
     usage: raw.usage,
     finishReason: choice.finish_reason,
   };
+}
+
+function lastContent(messages: Message[]): string | null {
+  const last = messages.at(-1);
+  return last ? last.content : null;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

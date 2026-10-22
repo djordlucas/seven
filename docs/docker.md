@@ -36,7 +36,7 @@ make ci                 # typecheck + lint + tests in the dev container
 |--------|------|
 | `make dev` | A shell in the dev container |
 | `make run` | The root agent in the runtime image, interactive |
-| `make serve`, `make serve-stop` | `seven serve` in the background (`seven-serve` service, restarted unless stopped), and stopping it |
+| `make serve`, `make serve-stop` | `seven serve` in the background (`seven-serve` service, restarted unless stopped), and stopping it. Its log lines are in `docker compose logs seven-serve` as well as in `.seven/logs/`. |
 | `make ci` | `make ci-host` inside the dev container: typecheck, lint, tests |
 | `make test`, `make lint`, `make typecheck`, `make fmt` | The single step, in the dev container |
 | `make test-net` | The tests including npm bundling, which needs the network |

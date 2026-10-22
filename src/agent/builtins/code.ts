@@ -4,7 +4,16 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Runner, RunResult } from "../../runner/index.ts";
 import { type StoredTool, TOOL_NAME, type ToolStore } from "../../tools/store.ts";
-import { asDeps, awaitRun, type Builtin, depsSchema, formatRun, positive, secs } from "./shared.ts";
+import {
+  asDeps,
+  awaitRun,
+  type Builtin,
+  type BuiltinContext,
+  depsSchema,
+  formatRun,
+  positive,
+  secs,
+} from "./shared.ts";
 
 export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
   return [
@@ -23,7 +32,7 @@ export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
         required: ["code"],
       },
       async run(a, ctx) {
-        const handle = ctx.runner.startEval(String(a.code), { args: a.args, deps: asDeps(a.deps) });
+        const handle = ctx.runner.startEval(String(a.code), { args: a.args, deps: asDeps(a.deps), log: ctx.log });
         return formatRun(await awaitRun(handle, ctx.signal));
       },
     },
@@ -62,15 +71,18 @@ export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
 
         let packages: Awaited<ReturnType<Runner["install"]>>;
         try {
-          packages = await ctx.runner.install(source, deps);
+          packages = await ctx.runner.install(source, deps, ctx.log);
         } catch (err) {
           return `error: ${err instanceof Error ? err.message : String(err)}`;
         }
 
         let trial = "";
         if (a.test_args !== undefined) {
-          const r = await trialRun(ctx.runner, name, source, a.test_args, timeoutMs);
-          if (!r.ok) return `not saved: the trial run failed\n${formatRun(r)}`;
+          const r = await trialRun(ctx, name, source, a.test_args, timeoutMs);
+          if (!r.ok) {
+            ctx.log.info("tool not saved: trial run failed", { tool: name, error: r.error?.split("\n")[0] });
+            return `not saved: the trial run failed\n${formatRun(r)}`;
+          }
           trial = `\ntrial run:\n${formatRun(r)}`;
         }
 
@@ -85,6 +97,7 @@ export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
           },
           source,
         });
+        ctx.log.info("tool saved", { tool: name, revision: meta.revision, packages: packages.map((p) => p.name) });
         return `saved ${name} (revision ${meta.revision})${trial}`;
       },
     },
@@ -104,7 +117,9 @@ export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
       parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
       async run(a, ctx) {
         const name = String(a.name);
-        return ctx.store.remove(name) ? `deleted ${name}` : `error: no tool named "${name}"`;
+        if (!ctx.store.remove(name)) return `error: no tool named "${name}"`;
+        ctx.log.info("tool deleted", { tool: name });
+        return `deleted ${name}`;
       },
     },
     {
@@ -141,7 +156,9 @@ export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
       },
       async run(a, ctx) {
         const name = String(a.name);
-        return ctx.store.setDisabled(name, String(a.reason)) ? `disabled ${name}` : `error: no tool named "${name}"`;
+        if (!ctx.store.setDisabled(name, String(a.reason))) return `error: no tool named "${name}"`;
+        ctx.log.warn("tool disabled", { tool: name, reason: String(a.reason) });
+        return `disabled ${name}`;
       },
     },
     {
@@ -150,7 +167,9 @@ export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
       parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
       async run(a, ctx) {
         const name = String(a.name);
-        return ctx.store.setDisabled(name, null) ? `enabled ${name}` : `error: no tool named "${name}"`;
+        if (!ctx.store.setDisabled(name, null)) return `error: no tool named "${name}"`;
+        ctx.log.info("tool enabled", { tool: name });
+        return `enabled ${name}`;
       },
     },
   ];
@@ -158,17 +177,17 @@ export function codeBuiltins(isBuiltin: (name: string) => boolean): Builtin[] {
 
 /** Run a candidate tool from a scratch file under the runner's home, so its imports resolve. */
 async function trialRun(
-  runner: Runner,
+  ctx: BuiltinContext,
   name: string,
   source: string,
   args: unknown,
   timeoutMs?: number,
 ): Promise<RunResult> {
-  const dir = fs.mkdtempSync(path.join(runner.home, "tmp", `trial-${name}-`));
+  const dir = fs.mkdtempSync(path.join(ctx.runner.home, "tmp", `trial-${name}-`));
   const file = path.join(dir, "source.ts");
   fs.writeFileSync(file, source);
   try {
-    return await runner.runFile(file, args, timeoutMs);
+    return await ctx.runner.runFile(file, args, timeoutMs, ctx.log.child({ tool: name, mode: "trial" }));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

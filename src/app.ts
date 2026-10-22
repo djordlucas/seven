@@ -6,6 +6,7 @@ import { Supervisor, type SupervisorEvent } from "./agent/supervisor.ts";
 import type { Config } from "./config.ts";
 import { limitConcurrency } from "./llm/limit.ts";
 import type { ChatModel } from "./llm/mistral.ts";
+import { type Logger, noopLogger } from "./log.ts";
 import { createRunner, llmModule, type Runner } from "./runner/index.ts";
 import { State } from "./state/db.ts";
 import { ToolStore } from "./tools/store.ts";
@@ -15,9 +16,15 @@ export interface Seven {
   store: ToolStore;
   runner: Runner;
   supervisor: Supervisor;
+  log: Logger;
 }
 
-export function createSeven(cfg: Config, model: ChatModel, onEvent?: (e: SupervisorEvent) => void): Seven {
+export function createSeven(
+  cfg: Config,
+  model: ChatModel,
+  onEvent?: (e: SupervisorEvent) => void,
+  log: Logger = noopLogger,
+): Seven {
   const state = new State(cfg.stateDb);
   const store = new ToolStore(state, path.join(cfg.home, "tools"));
   const limited = limitConcurrency(model, cfg.llmConcurrency);
@@ -29,6 +36,7 @@ export function createSeven(cfg: Config, model: ChatModel, onEvent?: (e: Supervi
     host: { llm: llmModule(limited) },
     // How seven.db() in a run knows which database to refuse.
     env: { SEVEN_STATE_DB: state.path },
+    log: log.child({ component: "runner" }),
   });
   const supervisor = new Supervisor({
     state,
@@ -39,6 +47,7 @@ export function createSeven(cfg: Config, model: ChatModel, onEvent?: (e: Supervi
     maxSteps: cfg.maxSteps,
     maxAgents: cfg.maxAgents,
     onEvent,
+    log,
   });
-  return { state, store, runner, supervisor };
+  return { state, store, runner, supervisor, log };
 }
