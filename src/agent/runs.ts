@@ -1,67 +1,106 @@
-// Background runs: tool calls the model started with start_tool and controls
-// by id. They live as long as the seven process and are not persisted.
+// Background runs: tool calls an agent started with start_tool and controls by
+// id. Each is a row in the state database, so its result and output outlive
+// the process; the live handle exists only in the process that started it. A
+// run still going when that process exits is marked lost at the next start.
 
-import type { RunHandle, RunResult } from "../runner/index.ts";
+import type { RunHandle } from "../runner/index.ts";
+import type { RunRow, State } from "../state/db.ts";
 
-export interface BackgroundRun {
-  /** `r1`, `r2`, … in start order. */
-  id: string;
-  tool: string;
-  handle: RunHandle;
-  /** Set when the run ends. */
-  result?: RunResult;
-  /** Whether the model has looked at the run since it ended. */
-  checked: boolean;
-}
-
-/** Finished runs kept for inspection; the oldest finished are dropped beyond this. */
-const KEEP_FINISHED = 50;
+/** Output lines kept in the database for a finished run. */
+const KEEP_LOG_LINES = 500;
 
 export class RunTable {
-  private readonly runs = new Map<string, BackgroundRun>();
-  private next = 0;
+  private readonly state: State;
+  private readonly handles = new Map<string, RunHandle>();
+  private closed = false;
 
-  add(tool: string, handle: RunHandle): BackgroundRun {
-    const run: BackgroundRun = { id: `r${++this.next}`, tool, handle, checked: false };
-    this.runs.set(run.id, run);
+  constructor(state: State) {
+    this.state = state;
+  }
+
+  add(agent: string, tool: string, handle: RunHandle): string {
+    const id = this.state.insertRun(agent, tool);
+    this.handles.set(id, handle);
     void handle.done.then((r) => {
-      run.result = r;
-      this.prune();
+      this.handles.delete(id);
+      // A run killed by shutdown was already marked lost.
+      if (!this.closed && this.state.isOpen) this.state.finishRun(id, { ...r, logs: r.logs.slice(-KEEP_LOG_LINES) });
     });
-    return run;
+    return id;
   }
 
-  get(id: string): BackgroundRun | undefined {
-    return this.runs.get(id);
+  get(id: string): RunRow | undefined {
+    return this.state.getRun(id);
   }
 
-  list(): BackgroundRun[] {
-    return [...this.runs.values()];
+  handle(id: string): RunHandle | undefined {
+    return this.handles.get(id);
   }
 
-  private prune(): void {
-    const finished = this.list().filter((r) => r.result);
-    for (const r of finished.slice(0, Math.max(0, finished.length - KEEP_FINISHED))) this.runs.delete(r.id);
+  /** An agent's runs, oldest first. */
+  list(agent: string): RunRow[] {
+    return this.state.listRuns(agent);
+  }
+
+  /** Kill every live run an agent started. */
+  killAll(agent: string): void {
+    for (const run of this.list(agent)) this.handles.get(run.id)?.kill();
+  }
+
+  /** Wait until a run's result is recorded. */
+  async settled(id: string): Promise<void> {
+    const h = this.handles.get(id);
+    if (!h) return;
+    await h.done;
+    // finishRun is chained on the same promise; let it run first.
+    await new Promise((r) => setImmediate(r));
+  }
+
+  /** Kill every live run and mark it lost: its process goes with this one. */
+  async shutdown(): Promise<void> {
+    this.closed = true;
+    const live = [...this.handles.values()];
+    for (const h of live) h.kill();
+    this.state.markLostRuns();
+    await Promise.all(live.map((h) => h.done));
+  }
+
+  markChecked(id: string): void {
+    this.state.markRunChecked(id);
   }
 }
 
 /** One line per run, for the system prompt and list_runs. */
-export function summarize(run: BackgroundRun, now = Date.now()): string {
-  const r = run.result;
-  if (!r) return `${run.id} ${run.tool}: ${run.handle.state()} for ${seconds(now - run.handle.startedAt)}`;
-  const outcome = r.ok ? "ok" : `failed: ${firstLine(r.error)}`;
-  return `${run.id} ${run.tool}: finished in ${seconds(r.durationMs)}, ${outcome}${run.checked ? "" : " (not checked yet)"}`;
+export function summarize(run: RunRow, live?: RunHandle, now = Date.now()): string {
+  const head = `${run.id} ${run.tool}`;
+  if (run.status === "running") {
+    const state = live?.state() ?? "running";
+    return `${head}: ${state} for ${seconds(now - Date.parse(run.startedAt))}`;
+  }
+  if (run.status === "lost") return `${head}: ${run.error}`;
+  const outcome = run.ok ? "ok" : `failed: ${firstLine(run.error)}`;
+  return `${head}: finished in ${seconds(run.durationMs ?? 0)}, ${outcome}${run.checked ? "" : " (not checked yet)"}`;
 }
 
-/** Full status of one run: state, result once done, and the last `tail` output lines. */
-export function describe(run: BackgroundRun, tail: number): string {
-  const lines = run.result?.logs ?? run.handle.logs();
-  // Describing a finished run is the model checking it.
-  if (run.result) run.checked = true;
-  const parts = [summarize(run)];
-  if (run.result) {
-    const r = run.result;
-    parts.push(r.ok ? (typeof r.value === "string" ? r.value : JSON.stringify(r.value, null, 2)) : `error: ${r.error}`);
+/** Full status of one run: state, result once done, and the last `tail` output lines. Marks a finished run checked. */
+export function describe(runs: RunTable, id: string, tail: number): string | undefined {
+  const before = runs.get(id);
+  if (!before) return undefined;
+  const live = runs.handle(id);
+  // Describing a finished run is the agent checking it.
+  if (before.status !== "running") runs.markChecked(id);
+  const run = runs.get(id) as RunRow;
+
+  const lines = run.status === "running" ? (live?.logs() ?? []) : run.logs;
+  const parts = [summarize(run, live)];
+  if (run.status === "done") {
+    parts.push(
+      run.ok
+        ? typeof run.value === "string"
+          ? run.value
+          : JSON.stringify(run.value ?? null, null, 2)
+        : `error: ${run.error}`,
+    );
   }
   if (lines.length > 0) {
     const shown = lines.slice(-tail);
@@ -76,6 +115,6 @@ function seconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function firstLine(s: string | undefined): string {
+function firstLine(s: string | null | undefined): string {
   return (s ?? "").split("\n")[0] ?? "";
 }

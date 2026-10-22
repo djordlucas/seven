@@ -1,7 +1,7 @@
 // npm packages for code the model writes. Every bare import that is not a Node
-// built-in is installed with npm into $SEVEN_HOME/node_modules before the code
+// built-in is installed with npm into <workspace>/.seven/node_modules before the code
 // runs; Node then resolves it from there, because run files live under
-// $SEVEN_HOME. Install scripts never run (--ignore-scripts). Nothing is
+// <workspace>/.seven. Install scripts never run (--ignore-scripts). Nothing is
 // allowlisted.
 
 import { execFile } from "node:child_process";

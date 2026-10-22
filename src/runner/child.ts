@@ -2,6 +2,9 @@
 // message naming a module file; this imports it, calls its default export, and
 // sends the result back. stdout and stderr are the parent's to capture.
 
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 export type ToChild =
@@ -34,8 +37,42 @@ const module_ = (mod: string) =>
               }),
     },
   );
+// seven.db(path): a SQLite database in the workspace (the working directory),
+// opened here in the child rather than over IPC so it is synchronous like any
+// node:sqlite database. Seven's own state database is refused.
+function openDb(file: string): DatabaseSync {
+  const workspace = process.cwd();
+  const abs = path.resolve(workspace, file);
+  const rel = path.relative(workspace, abs);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`seven.db: "${file}" is outside the workspace; databases live in the workspace`);
+  }
+  if (process.env.SEVEN_STATE_DB && sameFile(abs, process.env.SEVEN_STATE_DB)) {
+    throw new Error(`seven.db: "${file}" is seven's own database; use another file`);
+  }
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  return new DatabaseSync(abs);
+}
+
+/** Whether two paths name the same file, through symlinks (/var vs /private/var on macOS). */
+function sameFile(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
 Object.defineProperty(globalThis, "seven", {
-  value: new Proxy({}, { get: (_, mod) => (typeof mod !== "string" || mod === "then" ? undefined : module_(mod)) }),
+  value: new Proxy(
+    {},
+    {
+      get: (_, mod) => (mod === "db" ? openDb : typeof mod !== "string" || mod === "then" ? undefined : module_(mod)),
+    },
+  ),
 });
 
 process.on("message", async (m: ToChild) => {

@@ -1,12 +1,15 @@
-// Generated tools: the part of seven that seven writes.
+// Generated tools: the part of seven that seven writes. Shared by every agent.
 //
-// Each tool is a directory under <home>/tools/<name>/ holding its definition,
-// its source (which the runner runs as-is) and its run history. The store is
-// re-read every model step, so a tool defined mid-turn is callable on the next
-// step.
+// A tool's definition, source and run history are rows in the state database.
+// The runner needs a file to import, so each revision's source is also written
+// to <home>/tools/<name>/r<revision>.ts; the database is the record and the
+// file is derived from it. The store is read every model step, so a tool
+// defined mid-turn is callable on the next step — by any agent.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { SQLInputValue } from "node:sqlite";
+import type { State } from "../state/db.ts";
 
 export interface ToolMeta {
   name: string;
@@ -27,10 +30,19 @@ export interface ToolMeta {
   disabled?: { at: string; reason: string };
 }
 
-/** One line of a tool's runs.jsonl. */
+export interface StoredTool {
+  meta: ToolMeta;
+  source: string;
+  /** Absolute path of this revision's source file, for the runner. */
+  file: string;
+}
+
+/** One recorded run of a generated tool. */
 export interface RunRecord {
   at: string;
   revision: number;
+  /** The agent that called it. */
+  agent: string;
   mode: "sync" | "async";
   ok: boolean;
   durationMs: number;
@@ -38,44 +50,40 @@ export interface RunRecord {
   error?: string;
 }
 
-/** Records kept per tool; the file is trimmed to this many when it grows to twice that. */
-const KEEP_RUNS = 100;
-
-export interface StoredTool {
-  meta: ToolMeta;
-  source: string;
-  /** Absolute path of the source file, for the runner. */
-  file: string;
-}
-
 export const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
+/** Run records kept per tool; older ones are deleted as new ones arrive. */
+const KEEP_RUNS = 100;
+
 export class ToolStore {
+  private readonly state: State;
+  /** Where source files are written: <home>/tools. */
   readonly dir: string;
 
-  constructor(dir: string) {
+  constructor(state: State, dir: string) {
+    this.state = state;
     this.dir = dir;
   }
 
+  /** False once the state database is closed; late run records are dropped then. */
+  get isOpen(): boolean {
+    return this.state.isOpen;
+  }
+
   list(): ToolMeta[] {
-    if (!fs.existsSync(this.dir)) return [];
-    return fs
-      .readdirSync(this.dir, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && TOOL_NAME.test(e.name))
-      .flatMap((e) => {
-        try {
-          return [this.readMeta(e.name)];
-        } catch {
-          return []; // a half-written or hand-broken tool is skipped, not fatal
-        }
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.state.db
+      .prepare("SELECT * FROM tools ORDER BY name")
+      .all()
+      .map((r) => toMeta(r as Row));
   }
 
   get(name: string): StoredTool | undefined {
-    if (!TOOL_NAME.test(name) || !fs.existsSync(path.join(this.dir, name, "tool.json"))) return undefined;
-    const file = path.join(this.dir, name, "source.ts");
-    return { meta: this.readMeta(name), source: fs.readFileSync(file, "utf8"), file };
+    if (!TOOL_NAME.test(name)) return undefined;
+    const row = this.state.db.prepare("SELECT * FROM tools WHERE name = ?").get(name) as Row | undefined;
+    if (!row) return undefined;
+    const meta = toMeta(row);
+    const source = String(row.source);
+    return { meta, source, file: this.materialize(name, meta.revision, source) };
   }
 
   /**
@@ -85,81 +93,115 @@ export class ToolStore {
   save(tool: { meta: Omit<ToolMeta, "createdAt" | "updatedAt" | "revision" | "disabled">; source: string }): ToolMeta {
     const { name } = tool.meta;
     if (!TOOL_NAME.test(name)) throw new Error(`invalid tool name "${name}": must match ${TOOL_NAME}`);
-    const prev = this.get(name)?.meta;
     const now = new Date().toISOString();
-    const meta: ToolMeta = {
-      ...tool.meta,
-      createdAt: prev?.createdAt ?? now,
-      updatedAt: now,
-      revision: (prev?.revision ?? 0) + 1,
-    };
-
-    // Written to a sibling directory and renamed, so a reader never sees a
-    // tool.json that disagrees with its source.
-    const final = path.join(this.dir, name);
-    const tmp = path.join(this.dir, `.${name}.${process.pid}.tmp`);
-    fs.rmSync(tmp, { recursive: true, force: true });
-    fs.mkdirSync(tmp, { recursive: true });
-    fs.writeFileSync(path.join(tmp, "tool.json"), `${JSON.stringify(meta, null, 2)}\n`);
-    fs.writeFileSync(path.join(tmp, "source.ts"), tool.source);
-    const runs = path.join(final, "runs.jsonl");
-    if (fs.existsSync(runs)) fs.copyFileSync(runs, path.join(tmp, "runs.jsonl"));
-    fs.rmSync(final, { recursive: true, force: true });
-    fs.renameSync(tmp, final);
-    return meta;
+    const m = tool.meta;
+    this.state.db
+      .prepare(
+        `INSERT INTO tools (name, description, parameters, deps, packages, timeout_ms, revision, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+         ON CONFLICT (name) DO UPDATE SET
+           description = excluded.description, parameters = excluded.parameters, deps = excluded.deps,
+           packages = excluded.packages, timeout_ms = excluded.timeout_ms, source = excluded.source,
+           revision = tools.revision + 1, updated_at = excluded.updated_at,
+           disabled_at = NULL, disabled_reason = NULL`,
+      )
+      .run(
+        name,
+        m.description,
+        JSON.stringify(m.parameters),
+        JSON.stringify(m.deps),
+        JSON.stringify(m.packages),
+        m.timeoutMs ?? null,
+        tool.source,
+        now,
+        now,
+      );
+    const saved = this.get(name);
+    if (!saved) throw new Error(`tool ${name} vanished while saving`);
+    return saved.meta;
   }
 
   /** Disable a tool with a reason, or re-enable it with `null`. Returns false for an unknown tool. */
   setDisabled(name: string, reason: string | null): boolean {
-    const t = this.get(name);
-    if (!t) return false;
-    const { disabled: _, ...meta } = t.meta;
-    const next: ToolMeta = reason === null ? meta : { ...meta, disabled: { at: new Date().toISOString(), reason } };
-    this.writeMeta(name, next);
-    return true;
+    const r = this.state.db
+      .prepare("UPDATE tools SET disabled_at = ?, disabled_reason = ? WHERE name = ?")
+      .run(reason === null ? null : new Date().toISOString(), reason, name);
+    return r.changes > 0;
   }
 
   recordRun(name: string, record: RunRecord): void {
-    const file = path.join(this.dir, name, "runs.jsonl");
-    if (!fs.existsSync(path.dirname(file))) return; // deleted while it ran
-    fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
-    const lines = fs.readFileSync(file, "utf8").trimEnd().split("\n");
-    if (lines.length >= KEEP_RUNS * 2) fs.writeFileSync(file, `${lines.slice(-KEEP_RUNS).join("\n")}\n`);
+    const db = this.state.db;
+    if (!db.prepare("SELECT 1 FROM tools WHERE name = ?").get(name)) return; // deleted while it ran
+    db.prepare(
+      "INSERT INTO tool_runs (tool, revision, agent, mode, ok, duration_ms, error, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      name,
+      record.revision,
+      record.agent,
+      record.mode,
+      record.ok ? 1 : 0,
+      record.durationMs,
+      record.error ?? null,
+      record.at,
+    );
+    db.prepare(
+      "DELETE FROM tool_runs WHERE tool = ? AND id NOT IN (SELECT id FROM tool_runs WHERE tool = ? ORDER BY id DESC LIMIT ?)",
+    ).run(name, name, KEEP_RUNS);
   }
 
   /** The most recent `n` runs of a tool, oldest first. */
   history(name: string, n = KEEP_RUNS): RunRecord[] {
-    const file = path.join(this.dir, name, "runs.jsonl");
-    if (!TOOL_NAME.test(name) || !fs.existsSync(file)) return [];
-    return fs
-      .readFileSync(file, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .slice(-n)
-      .flatMap((l) => {
-        try {
-          return [JSON.parse(l) as RunRecord];
-        } catch {
-          return [];
-        }
+    return this.state.db
+      .prepare("SELECT * FROM (SELECT * FROM tool_runs WHERE tool = ? ORDER BY id DESC LIMIT ?) ORDER BY id")
+      .all(name, n)
+      .map((r) => {
+        const x = r as Row;
+        return {
+          at: String(x.at),
+          revision: Number(x.revision),
+          agent: String(x.agent),
+          mode: x.mode as RunRecord["mode"],
+          ok: Boolean(x.ok),
+          durationMs: Number(x.duration_ms),
+          ...(x.error !== null && { error: String(x.error) }),
+        };
       });
   }
 
   remove(name: string): boolean {
-    const dir = path.join(this.dir, name);
-    if (!TOOL_NAME.test(name) || !fs.existsSync(dir)) return false;
-    fs.rmSync(dir, { recursive: true, force: true });
-    return true;
+    if (!TOOL_NAME.test(name)) return false;
+    const r = this.state.db.prepare("DELETE FROM tools WHERE name = ?").run(name);
+    this.state.db.prepare("DELETE FROM tool_runs WHERE tool = ?").run(name);
+    fs.rmSync(path.join(this.dir, name), { recursive: true, force: true });
+    return r.changes > 0;
   }
 
-  private writeMeta(name: string, meta: ToolMeta): void {
-    const file = path.join(this.dir, name, "tool.json");
-    const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify(meta, null, 2)}\n`);
-    fs.renameSync(tmp, file);
+  /** Write a revision's source file if it is not there yet, and return its path. */
+  private materialize(name: string, revision: number, source: string): string {
+    const file = path.join(this.dir, name, `r${revision}.ts`);
+    if (!fs.existsSync(file) || fs.readFileSync(file, "utf8") !== source) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, source);
+      fs.renameSync(tmp, file);
+    }
+    return file;
   }
+}
 
-  private readMeta(name: string): ToolMeta {
-    return JSON.parse(fs.readFileSync(path.join(this.dir, name, "tool.json"), "utf8")) as ToolMeta;
-  }
+type Row = Record<string, SQLInputValue>;
+
+function toMeta(x: Row): ToolMeta {
+  return {
+    name: String(x.name),
+    description: String(x.description),
+    parameters: JSON.parse(String(x.parameters)),
+    deps: JSON.parse(String(x.deps)),
+    packages: JSON.parse(String(x.packages)),
+    createdAt: String(x.created_at),
+    updatedAt: String(x.updated_at),
+    revision: Number(x.revision),
+    ...(x.timeout_ms !== null && { timeoutMs: Number(x.timeout_ms) }),
+    ...(x.disabled_at !== null && { disabled: { at: String(x.disabled_at), reason: String(x.disabled_reason) } }),
+  };
 }

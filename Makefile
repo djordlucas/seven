@@ -7,12 +7,13 @@
 COMPOSE := docker compose
 DEV     := $(COMPOSE) run --rm dev
 
-.PHONY: help image image-dev dev run ci test test-net lint fmt typecheck deps-reset \
+.PHONY: help image image-dev dev run serve serve-stop ci test test-net lint fmt typecheck deps-reset \
         ci-host test-host lint-host typecheck-host start-host clean
 
 help:
 	@echo "make dev        shell in the dev container (repo at /app)"
 	@echo "make run        run seven in the runtime image (interactive)"
+	@echo "make serve      run every agent in the background (seven serve)"
 	@echo "make ci         typecheck + lint + test in the dev container"
 	@echo "make test-net   tests including the npm-bundling test (network)"
 	@echo "make image      build the runtime image (seven:latest)"
@@ -29,6 +30,12 @@ dev: image-dev
 
 run: image
 	$(COMPOSE) run --rm seven
+
+serve: image
+	$(COMPOSE) --profile serve up -d seven-serve
+
+serve-stop:
+	$(COMPOSE) --profile serve stop seven-serve
 
 ci: image-dev
 	$(DEV) make ci-host

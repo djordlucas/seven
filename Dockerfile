@@ -4,6 +4,9 @@
 #            /app by compose.yaml; `make ci` runs here.
 #   runtime  production deps and src/ only, as the unprivileged `node` user.
 #
+# All of seven's data — its state database, tool sources, node_modules, and
+# the agents' own files and databases — lives in the workspace, /workspace.
+#
 # Node runs the TypeScript sources directly, so there is no build stage.
 # The base is pinned to an exact tag; dependabot proposes bumps.
 
@@ -28,8 +31,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules node_modules
 COPY . .
-ENV SEVEN_HOME=/app/.seven \
-    SEVEN_WORKSPACE=/workspace
+ENV SEVEN_WORKSPACE=/workspace
 CMD ["bash"]
 
 FROM base AS prod-deps
@@ -43,11 +45,10 @@ COPY src src
 # The agent can read its own documentation (DOCS_STYLE.md, document types).
 COPY docs docs
 COPY spec spec
-RUN mkdir -p /data /workspace && chown node:node /data /workspace
-ENV SEVEN_HOME=/data \
-    SEVEN_WORKSPACE=/workspace \
+RUN mkdir -p /workspace && chown node:node /workspace
+ENV SEVEN_WORKSPACE=/workspace \
     NODE_ENV=production
 USER node
 WORKDIR /workspace
-VOLUME ["/data", "/workspace"]
+VOLUME ["/workspace"]
 ENTRYPOINT ["node", "--disable-warning=ExperimentalWarning", "/app/src/main.ts"]
