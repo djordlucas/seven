@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { createVM, runWasi } from "../src/vm/index.ts";
+import { createVM } from "../src/vm/index.ts";
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "seven-vm-test-"));
 const vm = createVM({
@@ -130,40 +130,3 @@ describe("vm", () => {
     assert.equal(r.value, "seven-builds-itself", r.error);
   });
 });
-
-describe("wasi", () => {
-  it("runs a command module and captures stdout", async () => {
-    const r = await runWasi(helloWasm());
-    assert.deepEqual(r, { code: 0, stdout: "hi\n", stderr: "" });
-  });
-
-  it("is reachable from the guest through seven:wasm", async () => {
-    const b64 = Buffer.from(helloWasm()).toString("base64");
-    const r = await vm.eval(
-      `import { run } from "seven:wasm"; export default (await run({ base64: "${b64}" })).stdout`,
-    );
-    assert.equal(r.value, "hi\n");
-  });
-});
-
-// A hand-encoded WASI module equivalent to:
-//   (import "wasi_snapshot_preview1" "fd_write" (func (param i32 i32 i32 i32) (result i32)))
-//   (memory (export "memory") 1)
-//   (data (i32.const 0) "\08\00\00\00\03\00\00\00")   ;; iovec { ptr: 8, len: 3 }
-//   (data (i32.const 8) "hi\n")
-//   (func (export "_start") (drop (call 0 (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 20))))
-function helloWasm(): Uint8Array {
-  const str = (s: string) => [s.length, ...Buffer.from(s)];
-  const section = (id: number, body: number[]) => [id, body.length, ...body];
-  const fn = [0x00, 0x41, 1, 0x41, 0, 0x41, 1, 0x41, 20, 0x10, 0, 0x1a, 0x0b];
-  return new Uint8Array([
-    ...[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00],
-    ...section(1, [2, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 0]),
-    ...section(2, [1, ...str("wasi_snapshot_preview1"), ...str("fd_write"), 0x00, 0]),
-    ...section(3, [1, 1]),
-    ...section(5, [1, 0x00, 1]),
-    ...section(7, [2, ...str("memory"), 0x02, 0, ...str("_start"), 0x00, 1]),
-    ...section(10, [1, fn.length, ...fn]),
-    ...section(11, [2, 0, 0x41, 0, 0x0b, 8, 8, 0, 0, 0, 3, 0, 0, 0, 0, 0x41, 8, 0x0b, 3, ...Buffer.from("hi\n")]),
-  ]);
-}

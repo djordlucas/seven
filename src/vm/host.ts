@@ -8,6 +8,7 @@
 import { exec } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type { ChatModel } from "../llm/mistral.ts";
 import type { HostModules } from "./quickjs.ts";
 import { runWasi, type WasiOptions } from "./wasi.ts";
 
@@ -94,6 +95,21 @@ export function defaultHost({ cwd }: HostOptions): HostModules {
         const bytes = typeof module === "string" ? await fs.readFile(at(module)) : Buffer.from(module.base64, "base64");
         return runWasi(bytes, { ...opts, cwd: opts.cwd ? at(opts.cwd) : cwd });
       },
+    },
+  };
+}
+
+/** `seven:llm`: one tool-less call to the model the agent runs on. */
+export function llmModule(model: ChatModel): HostModules[string] {
+  return {
+    chat: async (prompt: string, system?: string) => {
+      const { message } = await model.complete({
+        messages: [
+          ...(system ? [{ role: "system" as const, content: system }] : []),
+          { role: "user", content: prompt },
+        ],
+      });
+      return message.content ?? "";
     },
   };
 }

@@ -35,11 +35,12 @@ precisely; see `docs/glossary.md`.
 
 ## Changes that cross layers
 
-- **Adding a host module or function** touches three places in lockstep: the
-  implementation in `src/vm/host.ts` (or the `host` option of `createVM` for one
-  that needs agent state, like `seven:llm` in `src/main.ts`), the module list in
-  the system prompt (`src/agent/prompt.ts`) — the model only uses what it is told
-  exists — and the host module table in `docs/vm.md`.
+- **Adding a host module or function** touches four places in lockstep: the
+  implementation in `src/vm/host.ts` (a module that needs agent state, like
+  `seven:llm`, is a factory there that `src/main.ts` passes to `createVM`'s
+  `host` option), a test in `test/host.test.ts` that calls it from the guest,
+  the module list in the system prompt (`src/agent/prompt.ts`) — the model only
+  uses what it is told exists — and the host module table in `docs/vm.md`.
 - **`docs/` and `spec/` are the source of truth.** They hold the intended
   behavior; treat a code/doc mismatch as a bug to reconcile, not a doc to
   quietly follow. They ship in the runtime image, where the agent can read them.
