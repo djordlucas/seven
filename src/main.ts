@@ -12,6 +12,7 @@ import { Agent, type AgentEvent } from "./agent/agent.ts";
 import { loadConfig } from "./config.ts";
 import { Mistral } from "./llm/mistral.ts";
 import { ToolStore } from "./tools/store.ts";
+import { llmModule } from "./vm/host.ts";
 import { createVM } from "./vm/index.ts";
 
 const cfg = loadConfig();
@@ -33,19 +34,7 @@ const vm = createVM({
   cwd: cfg.workspace,
   depsDir: path.join(cfg.home, "deps"),
   timeoutMs: cfg.runTimeoutMs,
-  host: {
-    llm: {
-      chat: async (prompt: string, system?: string) => {
-        const { message } = await model.complete({
-          messages: [
-            ...(system ? [{ role: "system" as const, content: system }] : []),
-            { role: "user", content: prompt },
-          ],
-        });
-        return message.content ?? "";
-      },
-    },
-  },
+  host: { llm: llmModule(model) },
 });
 
 const agent = new Agent({ model, vm, store, workspace: cfg.workspace, maxSteps: cfg.maxSteps, onEvent: show });
