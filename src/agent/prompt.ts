@@ -31,6 +31,9 @@ export function systemPrompt(opts: {
   const agents = others.length
     ? `\n\n## Other active agents\n\n${others.map((a) => `- ${a.id} "${a.name}" (${a.mode}, ${a.status}): ${a.description}`).join("\n")}${more}`
     : "";
+  const summary = self.summary
+    ? `\n\n## Earlier in this conversation\n\nYour older messages were compacted into this summary to fit your context window; the messages after it are sent as usual.\n\n${self.summary}`
+    : "";
 
   return `${identity(self)}
 
@@ -66,7 +69,7 @@ Every run of a tool is recorded. tool_health shows a tool's recent runs, failure
 
 ## Working
 
-Act, then report. Test a tool with test_args when you define it. When a tool fails, read the error, fix the tool, and try again. Answer plainly and briefly once the task is done.${runs}${agents}`;
+Act, then report. Test a tool with test_args when you define it. When a tool fails, read the error, fix the tool, and try again. Answer plainly and briefly once the task is done.${runs}${agents}${summary}`;
 }
 
 function identity(self: AgentRow): string {

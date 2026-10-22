@@ -23,6 +23,7 @@ its behavior is absorbed into `docs/` and the plan stays as the record.
 
 | Document | What it records | Shipped |
 |----------|-----------------|---------|
+| `compaction.md` | Summarizing an agent's older messages to fit the context window; schema migrations | 2026-10-22 |
 | `multi-agent.md` | Many concurrent agents with inboxes, SQLite state in the workspace, agent databases | 2026-10-21 |
 | `child-process-runner.md` | Replacing the QuickJS-in-wasm VM with a Node.js child process per run; the npm compatibility probe that decided it | 2026-10-21 |
 
@@ -30,8 +31,7 @@ its behavior is absorbed into `docs/` and the plan stays as the record.
 
 | Document | What it records | Superseded by |
 |----------|-----------------|---------------|
-| `vm-runtime.md` | The QuickJS-in-wasm VM as a simpler equivalent of nine's tool VM: what was kept, what was dropped and why | `multi-agent.md` | Many concurrent agents with inboxes, SQLite state in the workspace, agent databases | 2026-10-21 |
-| `child-process-runner.md` |
+| `vm-runtime.md` | The QuickJS-in-wasm VM as a simpler equivalent of nine's tool VM: what was kept, what was dropped and why | `child-process-runner.md` |
 
 ## Limits
 

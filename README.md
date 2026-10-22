@@ -93,7 +93,7 @@ are tested; nothing has been tuned against real sessions yet.
 | Limit | Detail |
 |-------|--------|
 | No permission model | Deliberate: generated code can do anything the seven process can. Run it in its container. |
-| No context management | Long-lived agents eventually exceed the model's context window. |
+| Lossy memory | Long conversations are compacted into a summary; what it leaves out, the agent no longer sees. |
 | One process per workspace | Agents run in the one process holding the workspace's lease. |
 | One version per npm package | All tools share one `node_modules`; upgrading a package changes every tool that imports it. |
 

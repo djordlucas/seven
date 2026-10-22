@@ -3,6 +3,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { SUMMARIZER_PROMPT } from "../src/agent/compact.ts";
 import type { SupervisorEvent } from "../src/agent/supervisor.ts";
 import { createSeven, type Seven } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
@@ -15,7 +16,8 @@ export type Reply =
   | ((seen: Message[]) => Completion["message"] | Promise<Completion["message"]>);
 
 /**
- * Plays back a script per agent, recognising the agent from its system prompt,
+ * Plays back a script per agent, recognising the agent from its system prompt
+ * (the summarizer's requests are scripted as agent "summarizer"),
  * and records every request. A reply may be a function of the conversation.
  */
 export class ScriptedModel implements ChatModel {
@@ -33,7 +35,9 @@ export class ScriptedModel implements ChatModel {
 
   async complete(req: CompletionRequest): Promise<Completion> {
     const system = String(req.messages[0]?.content ?? "");
-    const agent = /^You are agent (\S+)/.exec(system)?.[1] ?? "seven";
+    const agent = system.startsWith(SUMMARIZER_PROMPT)
+      ? "summarizer"
+      : (/^You are agent (\S+)/.exec(system)?.[1] ?? "seven");
     this.seen.push({ agent, messages: structuredClone(req.messages), tools: req.tools ?? [] });
     const next = this.scripts.get(agent)?.shift();
     if (!next) throw new Error(`script exhausted for ${agent}`);

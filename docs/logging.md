@@ -46,10 +46,10 @@ seven logs --run r3 --json          # one background run, as raw JSON lines
 
 | Level | Logged |
 |-------|--------|
-| `error` | A model call that failed for good, a turn that ended in an error, a failed agent, a package install that failed, a run that could not start, an uncaught exception |
-| `warn` | A retried model call, a failed tool call, a run that timed out or exited without a result, a refused spawn, a disabled tool, a turn stopped at its step limit, runs lost to a restart, a lease held by another process |
-| `info` | Every turn, model reply, tool call, run, host call, message, spawn and end of an agent, tool change, and process start and stop |
-| `debug` | Previews of content: the input of a turn, the last message sent to the model, the model's reply text, tool arguments and results — each cut to 500 characters |
+| `error` | A compaction that failed, a model call that failed for good, a turn that ended in an error, a failed agent, a package install that failed, a run that could not start, an uncaught exception |
+| `warn` | A context overflow, a compaction with nothing to fold, a retried model call, a failed tool call, a run that timed out or exited without a result, a refused spawn, a disabled tool, a turn stopped at its step limit, runs lost to a restart, a lease held by another process |
+| `info` | Every turn, compaction, model reply, tool call, run, host call, message, spawn and end of an agent, tool change, and process start and stop |
+| `debug` | Previews of content: the input of a turn, the last message sent to the model, the model's reply text, tool arguments and results, a new summary — each cut to 500 characters |
 
 The default level is `info`. Content appears at `debug` only. The API key is
 never logged at any level.
@@ -60,7 +60,7 @@ never logged at any level.
 |-----------|-------|
 | Process | `seven started` (command, model, workspace, limits), `seven stopped`, `lease held by another process`, `uncaught exception`, `unhandled rejection` |
 | Supervisor | `supervisor started` (active agents), `supervisor stopping`, `agent spawned`, `spawn refused` (reason), `agent ended` (status, detail), `message sent`, `continuous agent's turn failed; retrying later`, `background runs lost in a restart`, `driving an agent failed` |
-| Agent loop | `turn started` (input: `user`, `task`, `message`, `wake` or `resume`), `turn finished` (outcome `answered` or `max_steps`, steps), `turn ended early` (`interrupted` or `error`), `message delivered`, `tool called` (tool, kind, ok, duration), `interrupted tool calls closed` |
+| Agent loop | `turn started` (input: `user`, `task`, `message`, `wake` or `resume`), `turn finished` (outcome `answered` or `max_steps`, steps), `turn ended early` (`interrupted` or `error`), `message delivered`, `tool called` (tool, kind, ok, duration), `interrupted tool calls closed`, `context compacted` (reason `threshold`, `overflow` or `manual`; messages folded and kept; estimated tokens before and after; summary length), `context overflowed`, `context compaction failed`, `context not compacted` |
 | Model client | `model replied` (duration, attempt, finish reason, tool calls, prompt and completion tokens), `model call retried` (status, delay), `model call failed`, `model call queued` (debug: time waiting for the concurrency limit), `model request`, `model reply content`, `model call aborted` (debug) |
 | Runner | `run started` (file, pid, limits), `run finished` (outcome `ok`, `error`, `killed`, `timeout` or `exited`; output lines; the exit code and signal for `exited`), `run kill requested`, `run could not start`, `run not started` (install or syntax error), `run cancelled before it started`, `host call`, `packages installed`, `package install failed` |
 | Background runs | `background run started`, `background run finished`, `killing background runs at shutdown` |

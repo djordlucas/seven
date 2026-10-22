@@ -1,14 +1,25 @@
 // One agent's loop: ask the model, run the tools it calls, repeat until it
 // answers without calling one. Its conversation lives in the state database,
 // one row per message, so a turn cut off by a restart resumes where it stopped.
+// When the conversation nears the context window, its older part is compacted
+// into a summary (compact.ts).
 
 import { randomUUID } from "node:crypto";
-import type { ChatModel, Message, ToolCall, ToolDef } from "../llm/mistral.ts";
+import type { ChatModel, Completion, Message, ToolCall, ToolDef } from "../llm/mistral.ts";
 import { type Logger, preview } from "../log.ts";
 import type { Runner } from "../runner/index.ts";
 import type { AgentRow, State } from "../state/db.ts";
 import type { ToolStore } from "../tools/store.ts";
 import { awaitRun, type BuiltinContext, builtins, disabledError, formatRun, startGenerated } from "./builtins/index.ts";
+import {
+  COMPACT_AT,
+  cutIndex,
+  isOverflow,
+  KEEP,
+  requestChars,
+  summarizeConversation,
+  TokenEstimator,
+} from "./compact.ts";
 import { systemPrompt } from "./prompt.ts";
 import { type RunTable, summarize } from "./runs.ts";
 import type { Supervisor } from "./supervisor.ts";
@@ -19,7 +30,11 @@ const MAX_RESULT_CHARS = 16_000;
 export type AgentEvent =
   | { type: "tool_call"; agent: string; name: string; args: string }
   | { type: "tool_result"; agent: string; name: string; result: string }
-  | { type: "answer"; agent: string; text: string };
+  | { type: "answer"; agent: string; text: string }
+  | { type: "compacted"; agent: string; folded: number; kept: number };
+
+/** Why a conversation was compacted: it neared the window, overflowed it, or was asked to. */
+export type CompactReason = "threshold" | "overflow" | "manual";
 
 export interface AgentDeps {
   state: State;
@@ -30,6 +45,8 @@ export interface AgentDeps {
   supervisor: Supervisor;
   workspace: string;
   maxSteps: number;
+  /** The model's context window, in tokens. */
+  contextTokens: number;
   /** Bound to this agent. */
   log: Logger;
   onEvent?: (e: AgentEvent) => void;
@@ -43,6 +60,7 @@ export class Agent {
   private readonly deps: AgentDeps;
   private abort?: AbortController;
   private turning = false;
+  private readonly estimator = new TokenEstimator();
 
   constructor(deps: AgentDeps, id: string) {
     this.deps = deps;
@@ -106,7 +124,7 @@ export class Agent {
     if (this.turning) throw new Error(`agent ${this.id} is already in a turn`);
     this.turning = true;
     this.abort = new AbortController();
-    const { state, model } = this.deps;
+    const { state } = this.deps;
     const log = this.deps.log.child({ turn: randomUUID().slice(0, 8) });
     const started = performance.now();
     let steps = 0;
@@ -129,13 +147,7 @@ export class Agent {
         steps = step + 1;
         const stepLog = log.child({ step: steps });
         this.deliverMessages(stepLog);
-        const { tools, system } = this.context();
-        const { message } = await model.complete({
-          messages: [system, ...state.history(this.id)],
-          tools,
-          signal: this.abort.signal,
-          log: stepLog,
-        });
+        const { message } = await this.complete(stepLog);
         this.append(message);
 
         if (!message.tool_calls?.length) {
@@ -185,6 +197,107 @@ export class Agent {
       | Extract<Message, { role: "assistant" }>
       | undefined;
     return last?.content ?? null;
+  }
+
+  /**
+   * Fold the older part of the conversation into the summary, keeping the
+   * recent messages that fit a quarter of the context window. Resolves with
+   * what was folded, or undefined when there was nothing to fold.
+   */
+  async compact(
+    reason: CompactReason,
+    log: Logger = this.deps.log,
+  ): Promise<{ folded: number; kept: number } | undefined> {
+    const { state, model, contextTokens } = this.deps;
+    const rows = state.context(this.id);
+    const cut = cutIndex(
+      rows.map((r) => r.message),
+      this.estimator.chars(contextTokens * KEEP),
+    );
+    if (cut === 0) {
+      log.warn("context not compacted", { reason, detail: "nothing to fold", messages: rows.length });
+      return undefined;
+    }
+    const started = performance.now();
+    const before = this.estimator.tokens(
+      requestChars(
+        rows.map((r) => r.message),
+        [],
+      ),
+    );
+    const summary = await summarizeConversation(model, {
+      previous: this.row().summary,
+      messages: rows.slice(0, cut).map((r) => r.message),
+      contextTokens,
+      estimator: this.estimator,
+      signal: this.abort?.signal,
+      log,
+    });
+    state.compact(this.id, summary, (rows[cut - 1] as { id: number }).id);
+    const after = this.estimator.tokens(requestChars(state.history(this.id), []) + summary.length);
+    const out = { folded: cut, kept: rows.length - cut };
+    log.info("context compacted", {
+      reason,
+      ...out,
+      tokens_before: before,
+      tokens_after: after,
+      summary_chars: summary.length,
+      compactions: this.row().compactions,
+      duration_ms: Math.round(performance.now() - started),
+      ...(log.enabled("debug") && { summary: preview(summary) }),
+    });
+    this.emit({ type: "compacted", agent: this.id, ...out });
+    return out;
+  }
+
+  /**
+   * One model call on the current conversation. The conversation is compacted
+   * first when the request is estimated near the window, or after the model
+   * refuses it as too long (then the call is made once more).
+   */
+  private async complete(log: Logger): Promise<Completion> {
+    const window = this.deps.contextTokens;
+    let req = this.request();
+    if (this.estimator.tokens(req.chars) > window * COMPACT_AT) {
+      try {
+        if (await this.compact("threshold", log)) req = this.request();
+      } catch (err) {
+        if (this.abort?.signal.aborted) throw err;
+        log.error("context compaction failed", { reason: "threshold", error: err });
+      }
+    }
+    try {
+      return await this.send(req, log);
+    } catch (err) {
+      if (this.abort?.signal.aborted || !isOverflow(err)) throw err;
+      log.warn("context overflowed", { tokens_estimated: this.estimator.tokens(req.chars), window });
+      if (!(await this.compact("overflow", log))) throw err;
+      return await this.send(this.request(), log);
+    }
+  }
+
+  private async send(req: { messages: Message[]; tools: ToolDef[]; chars: number }, log: Logger): Promise<Completion> {
+    const out = await this.deps.model.complete({
+      messages: req.messages,
+      tools: req.tools,
+      signal: this.abort?.signal,
+      log,
+    });
+    this.estimator.calibrate(req.chars, out.usage?.prompt_tokens);
+    return out;
+  }
+
+  /** The request for the next step: system prompt, the conversation since the last compaction, the tools. */
+  private request(): { messages: Message[]; tools: ToolDef[]; chars: number } {
+    const { tools, system } = this.context();
+    const history = this.deps.state.history(this.id);
+    // A compaction can cut in the middle of a turn; the model is still owed a user message first.
+    const lead: Message[] =
+      history[0] && history[0].role !== "user"
+        ? [{ role: "user", content: "(Earlier messages are summarized in the system prompt. Continue.)" }]
+        : [];
+    const messages = [system, ...lead, ...history];
+    return { messages, tools, chars: requestChars(messages, tools) };
   }
 
   /** Messages from other agents (or the user) that arrived since the last step join the conversation now. */

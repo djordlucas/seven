@@ -45,6 +45,7 @@ export function createSeven(
     model: limited,
     workspace: cfg.workspace,
     maxSteps: cfg.maxSteps,
+    contextTokens: cfg.contextTokens,
     maxAgents: cfg.maxAgents,
     onEvent,
     log,

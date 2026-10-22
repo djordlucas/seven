@@ -29,7 +29,7 @@ from its next step onward.
 |-----------|----------------|
 | CLI | Reads configuration, holds the lease, and runs the root agent interactively (`seven`), for one message (`seven "<message>"`), or runs every agent headless (`seven serve`). `seven agents`, `seven send`, `seven tools` and `seven logs` read the state database or the log without running agents. Agent activity is echoed to stderr. |
 | Supervisor | Runs every agent's loop concurrently: resumes unfinished agents at start, starts a turn for each idle agent with work in its inbox (polled every 250 ms), ends request and sequence agents when their tasks are done, and tells parents when children end (`multi-agent.md`). |
-| Agent loop | One per agent. Sends the agent's conversation and the current tool list to the model, runs every tool call in the reply, appends the results, and repeats until a reply has no tool calls or the step budget runs out. Every message is written to the state database as it is produced. |
+| Agent loop | One per agent. Sends the agent's conversation and the current tool list to the model, runs every tool call in the reply, appends the results, and repeats until a reply has no tool calls or the step budget runs out. Every message is written to the state database as it is produced. Compacts the conversation into a summary when it nears the context window (`compaction.md`). |
 | Model client | One non-streamed Mistral chat completion per step, with function tools. Retries 429 and 5xx responses with backoff, honouring `retry-after`. Shared by all agents, with at most `SEVEN_LLM_CONCURRENCY` calls in flight. |
 | State database | `<workspace>/.seven/seven.db`: agents, conversations, inboxes, tools, tool runs, background runs, the lease (`data.md`). |
 | Tool store | Generated tools, as rows in the state database; each revision's source is also written to `.seven/tools/<name>/r<revision>.ts` for the runner to import. |
@@ -43,14 +43,17 @@ from its next step onward.
 2. Messages that arrived in the agent's inbox since the last step are appended.
 3. The system prompt is rebuilt: who the agent is (its mode, parent and
    instructions), the generated tools, its background runs that are going or
-   unchecked, and the other active agents. The tool list is the built-ins plus
-   every enabled generated tool, read on every step.
-4. The model replies. A reply without tool calls is the answer and ends the turn.
-5. Each tool call runs in order. A built-in runs in the seven process and may
+   unchecked, the other active agents, and the summary of compacted messages.
+   The tool list is the built-ins plus every enabled generated tool, read on
+   every step.
+4. When the request is estimated above 75% of the context window, the older
+   messages are compacted into the summary first (`compaction.md`).
+5. The model replies. A reply without tool calls is the answer and ends the turn.
+6. Each tool call runs in order. A built-in runs in the seven process and may
    use the runner; a generated tool runs its source in a child process with the
    call's arguments. An unknown tool or invalid arguments produce an `error: …`
    result for the model, never an exception.
-6. Each result is cut to 16,000 characters and appended as a `tool` message.
+7. Each result is cut to 16,000 characters and appended as a `tool` message.
    The loop returns to step 2.
 
 A turn that reaches its step limit (`max_steps`, default `SEVEN_MAX_STEPS`)
@@ -136,6 +139,7 @@ All configuration comes from environment variables; `npm start` and
 | `SEVEN_LLM_ENDPOINT` | `https://api.mistral.ai/v1` | API base URL. |
 | `SEVEN_WORKSPACE` | current directory (`/workspace` in the image) | The working directory of every run, and where all of seven's data lives (`.seven/`). |
 | `SEVEN_MAX_STEPS` | `40` | Model calls one turn may take. |
+| `SEVEN_CONTEXT_TOKENS` | `128000` | The model's context window; conversations are compacted to fit it (`compaction.md`). |
 | `SEVEN_RUN_TIMEOUT_MS` | `60000` | Wall-clock budget of one run. |
 | `SEVEN_RUN_MEMORY_MB` | `1024` | V8 heap cap of one run, in MiB. |
 | `SEVEN_MAX_AGENTS` | `16` | Agents besides the root that may be active at once. |
@@ -146,7 +150,7 @@ All configuration comes from environment variables; `npm start` and
 
 | Limit | Detail |
 |-------|--------|
-| No context management | Each agent sends its whole conversation on every step; a long-lived agent eventually exceeds the model's context window and the API call fails. |
+| Lossy compaction | A compacted conversation is a summary; details the summarizer drops are gone from the agent's view (`compaction.md`). |
 | No streaming | Each model reply arrives whole. |
 | Sequential tool calls | Tool calls in one reply run one after another; `start_tool` and other agents are how work overlaps. |
 | No automatic disabling | Seven does not disable a tool on its own, however often it fails; agents decide from `tool_health`. |

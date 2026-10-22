@@ -14,6 +14,8 @@ The terms below have one meaning each across `docs/`, `spec/` and `adr/`.
 | Message | An inbox item from another agent or the user, delivered into a turn in progress or starting one. |
 | Agent loop | The cycle of model call → tool calls → results that handles one turn of one agent. |
 | Turn | One input — a user message, a task, a message, or a scheduled wake-up — and everything the agent loop does until it answers. |
+| Compaction | Folding the older part of an agent's conversation into a summary carried by its system prompt, so the request fits the context window. |
+| Context | The part of an agent's conversation sent to the model: every message after the last compaction. |
 | Step | One model call within a turn. A turn has at most `SEVEN_MAX_STEPS` steps. |
 | Tool | Anything the model can call by name: a built-in or a generated tool. |
 | Built-in | One of the tools seven ships with: `run_js`, `define_tool`, `read_tool`, `delete_tool`, `start_tool`, `run_status`, `wait_run`, `kill_run`, `list_runs`, `tool_health`, `disable_tool`, `enable_tool`, `spawn_agent`, `list_agents`, `find_agents`, `agent_status`, `send_message`, `wait_message`, `stop_agent`, `sql`. |
