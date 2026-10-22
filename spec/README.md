@@ -6,7 +6,7 @@ one of them, to be reconciled rather than ignored.
 
 | Contract | Prefix | Subject |
 |----------|--------|---------|
-| `contracts/vm.md` | `R-VM` | What a run guarantees to guest code and to the embedding program |
+| `contracts/runner.md` | `R-RUN` | What a run guarantees to the code it runs and to the embedding program |
 
 ## Limits
 

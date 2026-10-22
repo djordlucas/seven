@@ -12,12 +12,8 @@ The terms below have one meaning each across `docs/`, `spec/` and `adr/`.
 | Generated tool | A tool the agent wrote with `define_tool`, saved in the tool store. |
 | Tool store | `$SEVEN_HOME/tools/`, one directory per generated tool. |
 | Revision | A generated tool's version counter; it starts at 1 and increments on each redefinition. |
-| VM | The component that bundles and runs code: QuickJS compiled to wasm. |
-| Run | One execution of one module in a fresh QuickJS runtime, from evaluation to teardown. |
-| Bundle | The single self-contained ES module produced from source; its only imports are `seven:*`. |
-| Host module | A `seven:*` module whose functions are implemented by the seven process. |
-| Host function | One function of a host module. |
-| Prelude | The script that builds the guest's globals before the module is evaluated. |
-| Dependency cache | `$SEVEN_HOME/deps`, the `node_modules` shared by every bundle. |
-| Workspace | The directory relative paths resolve against (`SEVEN_WORKSPACE`). |
-| `SEVEN_HOME` | Seven's own state: the tool store and the dependency cache. |
+| Runner | The component that installs a module's packages and runs it in a child process. |
+| Run | One execution of one module in a fresh Node.js child process, from spawn to the kill of its process group. |
+| Host function | A function in the seven process that a run calls as `seven.<module>.<fn>` over IPC. |
+| Workspace | The working directory of every run (`SEVEN_WORKSPACE`). |
+| `SEVEN_HOME` | Seven's own state: the tool store and the `node_modules` runs import from. |

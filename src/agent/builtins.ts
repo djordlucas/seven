@@ -2,9 +2,11 @@
 // managing generated tools. Everything else — reading files, searching the web,
 // editing its workspace — seven has to build for itself with define_tool.
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ToolDef } from "../llm/mistral.ts";
+import type { Runner, RunResult } from "../runner/index.ts";
 import { TOOL_NAME, type ToolStore } from "../tools/store.ts";
-import type { RunResult, VM } from "../vm/index.ts";
 
 export interface Builtin extends ToolDef {
   run(args: Record<string, unknown>): Promise<string>;
@@ -12,17 +14,17 @@ export interface Builtin extends ToolDef {
 
 const depsSchema = {
   type: "object",
-  description: 'npm packages and version ranges, e.g. {"lodash-es": "^4"}. Imports not listed install at latest.',
+  description: 'npm packages and version ranges, e.g. {"lodash": "^4"}. Imports not listed install at latest.',
   additionalProperties: { type: "string" },
 };
 
-export function builtins(vm: VM, store: ToolStore): Builtin[] {
+export function builtins(runner: Runner, store: ToolStore): Builtin[] {
   const names = new Set<string>();
   const list: Builtin[] = [
     {
       name: "run_js",
       description:
-        "Run TypeScript/JavaScript once in the VM and return its result and console output. " +
+        "Run TypeScript/JavaScript once, in a fresh Node.js process, and return its result and output. " +
         "The module's default export (a value, or a function called with `args`) is the result.",
       parameters: {
         type: "object",
@@ -34,7 +36,7 @@ export function builtins(vm: VM, store: ToolStore): Builtin[] {
         required: ["code"],
       },
       async run(a) {
-        return formatRun(await vm.eval(String(a.code), { args: a.args, deps: asDeps(a.deps) }));
+        return formatRun(await runner.eval(String(a.code), { args: a.args, deps: asDeps(a.deps) }));
       },
     },
     {
@@ -65,16 +67,16 @@ export function builtins(vm: VM, store: ToolStore): Builtin[] {
         const source = String(a.code);
         const deps = asDeps(a.deps) ?? {};
 
-        let bundled: Awaited<ReturnType<VM["bundle"]>>;
+        let packages: Awaited<ReturnType<Runner["install"]>>;
         try {
-          bundled = await vm.bundle(source, deps);
+          packages = await runner.install(source, deps);
         } catch (err) {
           return `error: ${err instanceof Error ? err.message : String(err)}`;
         }
 
         let trial = "";
         if (a.test_args !== undefined) {
-          const r = await vm.run(bundled.code, a.test_args);
+          const r = await trialRun(runner, name, source, a.test_args);
           if (!r.ok) return `not saved: the trial run failed\n${formatRun(r)}`;
           trial = `\ntrial run:\n${formatRun(r)}`;
         }
@@ -85,10 +87,9 @@ export function builtins(vm: VM, store: ToolStore): Builtin[] {
             description: String(a.description),
             parameters: (a.parameters as Record<string, unknown>) ?? { type: "object" },
             deps,
-            packages: bundled.packages,
+            packages,
           },
           source,
-          bundle: bundled.code,
         });
         return `saved ${name} (revision ${meta.revision})${trial}`;
       },
@@ -100,8 +101,7 @@ export function builtins(vm: VM, store: ToolStore): Builtin[] {
       async run(a) {
         const t = store.get(String(a.name));
         if (!t) return `error: no tool named "${String(a.name)}"`;
-        const { meta } = t;
-        return `${JSON.stringify(meta, null, 2)}\n\n--- source.ts ---\n${t.source}`;
+        return `${JSON.stringify(t.meta, null, 2)}\n\n--- source.ts ---\n${t.source}`;
       },
     },
     {
@@ -117,11 +117,23 @@ export function builtins(vm: VM, store: ToolStore): Builtin[] {
   return list;
 }
 
+/** Run a candidate tool from a scratch file under the runner's home, so its imports resolve. */
+async function trialRun(runner: Runner, name: string, source: string, args: unknown): Promise<RunResult> {
+  const dir = fs.mkdtempSync(path.join(runner.home, "tmp", `trial-${name}-`));
+  const file = path.join(dir, "source.ts");
+  fs.writeFileSync(file, source);
+  try {
+    return await runner.runFile(file, args);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export function formatRun(r: RunResult): string {
   const parts: string[] = [];
   if (r.ok) parts.push(typeof r.value === "string" ? r.value : JSON.stringify(r.value, null, 2));
   else parts.push(`error: ${r.error}`);
-  if (r.logs.length > 0) parts.push(`--- console ---\n${r.logs.join("\n")}`);
+  if (r.logs.length > 0) parts.push(`--- output ---\n${r.logs.join("\n")}`);
   return parts.join("\n");
 }
 

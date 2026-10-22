@@ -1,6 +1,6 @@
 # VM runtime
 
-**Status:** Implemented — **Date:** 2026-10-21
+**Status:** Superseded by `adr/child-process-runner.md` — **Date:** 2026-10-21
 **Scope:** `src/vm/` — **Derived from:** nine's `internal/toolvm` (QuickJS + wazero)
 
 Seven's VM was built as a simpler equivalent of nine's tool VM. It kept nine's
@@ -60,5 +60,5 @@ TypeScript against nine's roughly 25,000 lines of Go, C and JavaScript.
 
 ## Limits
 
-The record above reflects the bootstrap commit. The VM's present behavior is in
-`docs/vm.md` and `spec/contracts/vm.md`.
+The VM was replaced by child processes the same day; see
+`adr/child-process-runner.md`. Present behavior is in `docs/runner.md`.

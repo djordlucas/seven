@@ -6,7 +6,7 @@ design history is in `adr/`; the normative contracts are in `spec/`.
 | Document | Subject |
 |----------|---------|
 | `architecture.md` | Components, the agent loop, built-in and generated tools, configuration |
-| `vm.md` | The VM: runs, limits, globals, host modules, dependencies, raw wasm |
+| `runner.md` | The runner: runs, limits, host functions, dependencies |
 | `docker.md` | Images, volumes and Make targets for running and developing seven |
 | `glossary.md` | The terms these documents use |
 

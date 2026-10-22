@@ -26,21 +26,23 @@ Seven is one Node.js process. There is no daemon and no persistence beyond files
   every **generated tool** in the **tool store** (`src/tools/store.ts`,
   `$SEVEN_HOME/tools/`). The store is re-read every model step, so a tool the
   agent defines is callable on its next step.
-- Built-in and generated code runs in the **VM** (`src/vm`): QuickJS compiled to
-  wasm, one fresh runtime per run, with host functions exposed as `seven:*`
-  modules. The VM has **no permission model** by design (`docs/vm.md`).
+- Built-in and generated code runs in the **runner** (`src/runner`): one Node.js
+  child process per run, killed with its process group when the result is back,
+  with all of Node and npm available. The runner has **no permission model** by
+  design (`docs/runner.md`).
 
 Terms like tool, generated tool, run, host module and workspace are used
 precisely; see `docs/glossary.md`.
 
 ## Changes that cross layers
 
-- **Adding a host module or function** touches four places in lockstep: the
-  implementation in `src/vm/host.ts` (a module that needs agent state, like
-  `seven:llm`, is a factory there that `src/main.ts` passes to `createVM`'s
-  `host` option), a test in `test/host.test.ts` that calls it from the guest,
-  the module list in the system prompt (`src/agent/prompt.ts`) — the model only
-  uses what it is told exists — and the host module table in `docs/vm.md`.
+- **Adding a host function** (`seven.<module>.<fn>` in a run) touches four
+  places in lockstep: a factory in `src/runner/host.ts` that `src/main.ts`
+  passes to `createRunner`'s `host` option, a test in `test/runner.test.ts` that
+  calls it from a run, the system prompt (`src/agent/prompt.ts`) — the model only
+  uses what it is told exists — and the host function table in
+  `docs/runner.md`. Most capabilities need none of this: a run already has all
+  of Node.
 - **`docs/` and `spec/` are the source of truth.** They hold the intended
   behavior; treat a code/doc mismatch as a bug to reconcile, not a doc to
   quietly follow. They ship in the runtime image, where the agent can read them.
