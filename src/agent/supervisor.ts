@@ -43,6 +43,8 @@ export interface SupervisorOptions {
   model: ChatModel;
   workspace: string;
   maxSteps: number;
+  /** The model's context window, in tokens. */
+  contextTokens: number;
   /** Agents other than the root that may be running or idle at once. */
   maxAgents: number;
   onEvent?: (e: SupervisorEvent) => void;
@@ -244,10 +246,22 @@ export class Supervisor {
   private agent(id: string): Agent | undefined {
     let a = this.agents.get(id);
     if (!a && this.opts.state.getAgent(id)) {
-      const { state, store, runner, model, workspace, maxSteps, onEvent } = this.opts;
+      const { state, store, runner, model, workspace, maxSteps, contextTokens, onEvent } = this.opts;
       const log = (this.opts.log ?? noopLogger).child({ agent: id });
       a = new Agent(
-        { state, store, runner, runs: this.runs, model, supervisor: this, workspace, maxSteps, onEvent, log },
+        {
+          state,
+          store,
+          runner,
+          runs: this.runs,
+          model,
+          supervisor: this,
+          workspace,
+          maxSteps,
+          contextTokens,
+          onEvent,
+          log,
+        },
         id,
       );
       this.agents.set(id, a);

@@ -34,6 +34,10 @@ export interface AgentRow {
   finishedAt: string | null;
   /** When the agent last finished a turn. */
   lastTurnAt: string | null;
+  /** The conversation before the context window's start, folded into a summary; null until compacted. */
+  summary: string | null;
+  /** How many times the conversation was compacted. */
+  compactions: number;
 }
 
 export interface InboxRow {
@@ -144,6 +148,19 @@ CREATE TABLE IF NOT EXISTS lease (
 INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '1'), ('agent_seq', '0'), ('run_seq', '0');
 `;
 
+/**
+ * Changes to SCHEMA, in order: migration i takes a database from version i + 1
+ * to i + 2. A new database is created at version 1 and migrated like an old one.
+ */
+const MIGRATIONS = [
+  // 2: context compaction. Messages with id <= context_from are folded into summary.
+  `ALTER TABLE agents ADD COLUMN summary TEXT;
+   ALTER TABLE agents ADD COLUMN context_from INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE agents ADD COLUMN compactions INTEGER NOT NULL DEFAULT 0;`,
+];
+
+export const SCHEMA_VERSION = MIGRATIONS.length + 1;
+
 /** The root agent's id and name. */
 export const ROOT_ID = "seven";
 
@@ -164,6 +181,7 @@ export class State {
     // write while an agent process holds the database open.
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
     this.db.exec(SCHEMA);
+    this.migrate();
     if (!this.getAgent(ROOT_ID)) {
       this.createAgent({
         id: ROOT_ID,
@@ -194,6 +212,18 @@ export class State {
       this.db.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  private migrate(): void {
+    this.tx(() => {
+      const row = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string };
+      const from = Number(row.value);
+      if (from > SCHEMA_VERSION) {
+        throw new Error(`${this.path} is schema version ${from}; this seven knows up to ${SCHEMA_VERSION}`);
+      }
+      for (let v = from; v < SCHEMA_VERSION; v++) this.db.exec(MIGRATIONS[v - 1] as string);
+      this.db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+    });
   }
 
   private next(counter: "agent_seq" | "run_seq"): number {
@@ -276,15 +306,44 @@ export class State {
       .run(agent, JSON.stringify(message), now());
   }
 
+  /** The conversation the model is sent: every message after the last compaction. */
   history(agent: string): Message[] {
+    return this.context(agent).map((r) => r.message);
+  }
+
+  /** `history`, with each message's id. */
+  context(agent: string): { id: number; message: Message }[] {
     return this.db
-      .prepare("SELECT body FROM messages WHERE agent = ? ORDER BY id")
+      .prepare(
+        "SELECT m.id, m.body FROM messages m JOIN agents a ON a.id = m.agent WHERE m.agent = ? AND m.id > a.context_from ORDER BY m.id",
+      )
       .all(agent)
-      .map((r) => JSON.parse(String((r as { body: string }).body)) as Message);
+      .map((r) => {
+        const x = r as { id: number; body: string };
+        return { id: Number(x.id), message: JSON.parse(String(x.body)) as Message };
+      });
+  }
+
+  /** Every message the agent ever had, compacted or not. */
+  transcriptLength(agent: string): number {
+    const r = this.db.prepare("SELECT count(*) AS n FROM messages WHERE agent = ?").get(agent) as { n: number };
+    return Number(r.n);
+  }
+
+  /** Fold the conversation up to and including message `through` into `summary`. */
+  compact(agent: string, summary: string, through: number): void {
+    this.db
+      .prepare(
+        "UPDATE agents SET summary = ?, context_from = ?, compactions = compactions + 1, updated_at = ? WHERE id = ?",
+      )
+      .run(summary, through, now(), agent);
   }
 
   clearHistory(agent: string): void {
-    this.db.prepare("DELETE FROM messages WHERE agent = ?").run(agent);
+    this.tx(() => {
+      this.db.prepare("DELETE FROM messages WHERE agent = ?").run(agent);
+      this.db.prepare("UPDATE agents SET summary = NULL, updated_at = ? WHERE id = ?").run(now(), agent);
+    });
   }
 
   // ── inboxes ───────────────────────────────────────────────────────────────
@@ -427,6 +486,8 @@ function toAgent(r: unknown): AgentRow {
     updatedAt: String(x.updated_at),
     finishedAt: x.finished_at === null ? null : String(x.finished_at),
     lastTurnAt: x.last_turn_at === null ? null : String(x.last_turn_at),
+    summary: x.summary === null ? null : String(x.summary),
+    compactions: Number(x.compactions),
   };
 }
 

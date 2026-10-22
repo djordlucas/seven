@@ -24,6 +24,9 @@ against.
 | R-AG.13 | Every conversation message is written to the state database as it is produced. At start, a tool call without a result gets an `interrupted` result, and an agent whose conversation ends on unanswered input resumes without new input. |
 | R-AG.14 | At most one process holds a workspace's lease at a time; a lease whose holder is not alive, or not renewed for 15 s, may be taken over. |
 | R-AG.15 | Seven's data lives under the workspace: the state database at `.seven/seven.db`. The `sql` built-in and `seven.db()` refuse a path outside the workspace or naming the state database. |
+| R-AG.16 | Before a model call whose request is estimated above 75% of `SEVEN_CONTEXT_TOKENS`, and after a model error naming the request as too long, the agent's older messages are folded into a summary; after an overflow the call is made once more. |
+| R-AG.17 | A compaction keeps the conversation valid to send: the kept messages start at a user or assistant message, never a tool result, and the request starts with a user message after the system prompt. |
+| R-AG.18 | A compaction deletes no message: folded messages stay in the state database, and the summary and the context's start persist across restarts. |
 
 ## Limits
 
