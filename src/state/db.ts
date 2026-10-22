@@ -360,18 +360,19 @@ export class State {
   }
 
   /** Runs recorded as running belong to a process that is gone; their output is lost. */
-  markLostRuns(): void {
-    this.db
+  markLostRuns(): number {
+    const r = this.db
       .prepare(
         "UPDATE runs SET status = 'lost', ok = 0, error = 'lost: seven restarted while it ran' WHERE status = 'running'",
       )
       .run();
+    return Number(r.changes);
   }
 
   // ── lease ─────────────────────────────────────────────────────────────────
 
   /** Claim the right to run agents. Fails while another live process holds a fresh lease. */
-  acquireLease(pid = process.pid): { ok: true } | { ok: false; pid: number } {
+  acquireLease(pid = process.pid): { ok: true; tookOverFrom?: number } | { ok: false; pid: number } {
     return this.tx(() => {
       const held = this.db.prepare("SELECT pid, heartbeat_at FROM lease WHERE id = 1").get() as
         | { pid: number; heartbeat_at: number }
@@ -384,7 +385,7 @@ export class State {
           "INSERT INTO lease (id, pid, heartbeat_at) VALUES (1, ?, ?) ON CONFLICT (id) DO UPDATE SET pid = ?, heartbeat_at = ?",
         )
         .run(pid, Date.now(), pid, Date.now());
-      return { ok: true as const };
+      return { ok: true as const, ...(held && held.pid !== pid && { tookOverFrom: held.pid }) };
     });
   }
 

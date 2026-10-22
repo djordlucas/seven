@@ -6,7 +6,9 @@ import * as path from "node:path";
 import type { SupervisorEvent } from "../src/agent/supervisor.ts";
 import { createSeven, type Seven } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
-import type { ChatModel, Completion, Message, ToolDef } from "../src/llm/mistral.ts";
+import type { ChatModel, Completion, CompletionRequest, Message, ToolDef } from "../src/llm/mistral.ts";
+import { createLogger, type Level } from "../src/log.ts";
+import type { LogRecord } from "../src/logs.ts";
 
 export type Reply =
   | Completion["message"]
@@ -29,7 +31,7 @@ export class ScriptedModel implements ChatModel {
     this.scripts.set(agent, [...(this.scripts.get(agent) ?? []), ...replies]);
   }
 
-  async complete(req: { messages: Message[]; tools?: ToolDef[]; signal?: AbortSignal }): Promise<Completion> {
+  async complete(req: CompletionRequest): Promise<Completion> {
     const system = String(req.messages[0]?.content ?? "");
     const agent = /^You are agent (\S+)/.exec(system)?.[1] ?? "seven";
     this.seen.push({ agent, messages: structuredClone(req.messages), tools: req.tools ?? [] });
@@ -63,25 +65,32 @@ export interface Harness extends Seven {
   model: ScriptedModel;
   workspace: string;
   events: SupervisorEvent[];
+  /** Every log line written, parsed; collected when `logLevel` is given. */
+  logs: LogRecord[];
   close(): Promise<void>;
 }
 
 /** A started seven in a fresh workspace (or `workspace`, to restart on an existing one). */
 export function harness(
   scripts: Record<string, Reply[]>,
-  opts: { workspace?: string; env?: Record<string, string> } = {},
+  opts: { workspace?: string; env?: Record<string, string>; logLevel?: Level } = {},
 ): Harness {
   const workspace = opts.workspace ?? fs.mkdtempSync(path.join(os.tmpdir(), "seven-test-"));
   const cfg = loadConfig({ SEVEN_WORKSPACE: workspace, SEVEN_MAX_STEPS: "10", ...opts.env });
   const model = new ScriptedModel(scripts);
   const events: SupervisorEvent[] = [];
-  const seven = createSeven(cfg, model, (e) => events.push(e));
+  const logs: LogRecord[] = [];
+  const log = opts.logLevel
+    ? createLogger({ level: opts.logLevel, sinks: [(line) => logs.push(JSON.parse(line) as LogRecord)] })
+    : undefined;
+  const seven = createSeven(cfg, model, (e) => events.push(e), log);
   seven.supervisor.start();
   return {
     ...seven,
     model,
     workspace,
     events,
+    logs,
     async close() {
       await seven.supervisor.shutdown();
       seven.state.close();

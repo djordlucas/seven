@@ -3,6 +3,7 @@
 
 import * as path from "node:path";
 import { DEFAULT_ENDPOINT } from "./llm/mistral.ts";
+import { type Level, parseLevel } from "./log.ts";
 
 export interface Config {
   apiKey: string;
@@ -24,6 +25,12 @@ export interface Config {
   maxAgents: number;
   /** Model calls in flight at once, across all agents. */
   llmConcurrency: number;
+  /** Lowest level logged. */
+  logLevel: Level;
+  /** JSON-lines log file: <home>/logs/seven.log; empty when logging to a file is off. */
+  logFile: string;
+  /** Also log to stderr: on for `seven serve` unless set. */
+  logStderr: boolean | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -41,6 +48,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     runMemoryMb: int(env.SEVEN_RUN_MEMORY_MB, 1024),
     maxAgents: int(env.SEVEN_MAX_AGENTS, 16),
     llmConcurrency: int(env.SEVEN_LLM_CONCURRENCY, 4),
+    logLevel: parseLevel(env.SEVEN_LOG_LEVEL, "info"),
+    logFile: env.SEVEN_LOG_FILE === "off" ? "" : path.resolve(workspace, env.SEVEN_LOG_FILE ?? ".seven/logs/seven.log"),
+    logStderr: env.SEVEN_LOG_STDERR === undefined ? undefined : env.SEVEN_LOG_STDERR === "1",
   };
 }
 

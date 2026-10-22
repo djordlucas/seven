@@ -20,7 +20,12 @@ export function limitConcurrency(model: ChatModel, max: number): ChatModel {
   };
   return {
     async complete(req) {
+      const queued = active >= max;
+      const started = performance.now();
       await acquire();
+      if (queued) {
+        req.log?.debug("model call queued", { waited_ms: Math.round(performance.now() - started), limit: max });
+      }
       try {
         return await model.complete(req);
       } finally {

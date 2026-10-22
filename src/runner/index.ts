@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { type Logger, noopLogger, preview } from "../log.ts";
 import type { ToChild, ToParent } from "./child.ts";
 import { initHome, installDeps, type Package } from "./deps.ts";
 import type { HostModules } from "./host.ts";
@@ -30,6 +31,8 @@ export interface RunnerOptions {
   memoryMb?: number;
   /** Variables added to the environment every run inherits from seven. */
   env?: Record<string, string>;
+  /** Default logger for runs; a caller can pass its own per run. */
+  log?: Logger;
 }
 
 export interface RunResult {
@@ -44,6 +47,8 @@ export interface RunResult {
 
 /** A run in progress, or finished. */
 export interface RunHandle {
+  /** Unique per run, for correlating log lines (`run_id`). */
+  readonly id: string;
   /** Resolves when the run ends, however it ends. Never rejects. */
   readonly done: Promise<RunResult>;
   /** `Date.now()` when the run was started. */
@@ -60,18 +65,19 @@ export interface EvalOptions {
   args?: unknown;
   deps?: Record<string, string>;
   timeoutMs?: number;
+  log?: Logger;
 }
 
 export interface Runner {
   readonly home: string;
   /** Install the packages `source` imports (and `deps`). */
-  install(source: string, deps?: Record<string, string>): Promise<Package[]>;
+  install(source: string, deps?: Record<string, string>, log?: Logger): Promise<Package[]>;
   /** Start a module file that is already under `home`. */
-  startFile(file: string, args?: unknown, timeoutMs?: number): RunHandle;
+  startFile(file: string, args?: unknown, timeoutMs?: number, log?: Logger): RunHandle;
   /** Install, write to a temporary file, run, delete. An install failure is a failed run. */
   startEval(source: string, opts?: EvalOptions): RunHandle;
   /** `startFile(...).done`. */
-  runFile(file: string, args?: unknown, timeoutMs?: number): Promise<RunResult>;
+  runFile(file: string, args?: unknown, timeoutMs?: number, log?: Logger): Promise<RunResult>;
   /** `startEval(...).done`. */
   eval(source: string, opts?: EvalOptions): Promise<RunResult>;
 }
@@ -90,9 +96,11 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   const runner: Runner = {
     home,
-    install: (source, deps) => installDeps(home, source, deps),
-    startFile: (file, args, timeoutMs) =>
+    install: (source, deps, log) => installDeps(home, source, deps, log ?? opts.log),
+    startFile: (file, args, timeoutMs, log) =>
       startChild({
+        log: log ?? opts.log ?? noopLogger,
+        home,
         file: path.resolve(file),
         args,
         cwd: opts.cwd,
@@ -101,24 +109,42 @@ export function createRunner(opts: RunnerOptions): Runner {
         memoryMb: opts.memoryMb ?? DEFAULT_MEMORY_MB,
         env: { ...process.env, ...opts.env },
       }),
-    startEval(source, { args, deps, timeoutMs } = {}) {
+    startEval(source, { args, deps, timeoutMs, log } = {}) {
       // Installing comes first and can take a while, so the handle exists
       // before the process does; a kill during the install cancels the run.
       const startedAt = Date.now();
+      const id = randomUUID().slice(0, 8);
+      const evalLog = (log ?? opts.log ?? noopLogger).child({ component: "runner", run_id: id });
       let child: RunHandle | undefined;
       let killed = false;
       let finished = false;
       const done = (async (): Promise<RunResult> => {
         try {
-          await runner.install(source, deps);
+          await runner.install(source, deps, evalLog);
         } catch (err) {
-          return { ok: false, error: err instanceof Error ? err.message : String(err), logs: [], durationMs: 0 };
+          const error = err instanceof Error ? err.message : String(err);
+          evalLog.warn("run not started", { error: preview(error) });
+          return { ok: false, error, logs: [], durationMs: 0 };
         }
-        if (killed) return { ok: false, error: "killed", logs: [], durationMs: 0 };
+        if (killed) {
+          evalLog.info("run cancelled before it started");
+          return { ok: false, error: "killed", logs: [], durationMs: 0 };
+        }
         const file = path.join(tmp, `run-${randomUUID()}.ts`);
         fs.writeFileSync(file, source);
         try {
-          child = runner.startFile(file, args, timeoutMs);
+          child = startChild({
+            log: evalLog,
+            id,
+            home,
+            file,
+            args,
+            cwd: opts.cwd,
+            host: opts.host ?? {},
+            timeoutMs: timeoutMs ?? opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            memoryMb: opts.memoryMb ?? DEFAULT_MEMORY_MB,
+            env: { ...process.env, ...opts.env },
+          });
           return await child.done;
         } finally {
           fs.rmSync(file, { force: true });
@@ -127,6 +153,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         finished = true;
       });
       return {
+        id,
         done,
         startedAt,
         state: () => (finished ? "done" : child ? "running" : "installing"),
@@ -137,7 +164,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         },
       };
     },
-    runFile: (file, args, timeoutMs) => runner.startFile(file, args, timeoutMs).done,
+    runFile: (file, args, timeoutMs, log) => runner.startFile(file, args, timeoutMs, log).done,
     eval: (source, evalOpts) => runner.startEval(source, evalOpts).done,
   };
   return runner;
@@ -150,6 +177,10 @@ process.once("exit", () => {
 });
 
 interface ChildRun {
+  log: Logger;
+  /** Set when the run already has an id (startEval); otherwise one is made. */
+  id?: string;
+  home: string;
   file: string;
   args: unknown;
   cwd: string;
@@ -162,6 +193,8 @@ interface ChildRun {
 function startChild(run: ChildRun): RunHandle {
   const startedAt = Date.now();
   const started = performance.now();
+  const id = run.id ?? randomUUID().slice(0, 8);
+  const log = run.id ? run.log : run.log.child({ component: "runner", run_id: id });
   const child = spawn(
     process.execPath,
     [
@@ -181,6 +214,12 @@ function startChild(run: ChildRun): RunHandle {
   );
 
   live.add(child);
+  log.info("run started", {
+    file: path.relative(run.home, run.file),
+    pid: child.pid,
+    timeout_ms: run.timeoutMs,
+    memory_mb: run.memoryMb,
+  });
   const logs = new LogCollector();
   child.stdout?.on("data", (b: Buffer) => logs.add("", b));
   child.stderr?.on("data", (b: Buffer) => logs.add("[stderr] ", b));
@@ -196,7 +235,14 @@ function startChild(run: ChildRun): RunHandle {
 
   child.on("message", (m: ToParent) => {
     if (m.type === "call") {
+      const callStarted = performance.now();
       void callHost(run.host, m.name, m.args).then((reply) => {
+        log.info("host call", {
+          fn: m.name,
+          ok: reply.ok,
+          duration_ms: Math.round(performance.now() - callStarted),
+          ...(!reply.ok && { error: reply.error }),
+        });
         if (child.connected) child.send({ type: "reply", id: m.id, ...reply } satisfies ToChild);
       });
       return;
@@ -226,17 +272,30 @@ function startChild(run: ChildRun): RunHandle {
           result = { ok: false, error: `process exited (${how}) before returning a result${tail ? `\n${tail}` : ""}` };
         }
       }
-      resolve({ ...result, logs: logs.lines, durationMs: Math.round(performance.now() - started) });
+      const durationMs = Math.round(performance.now() - started);
+      const how = endedHow(result, killed, timedOut, Boolean(outcome));
+      const level = how === "ok" || how === "error" || how === "killed" ? "info" : "warn";
+      log[level]("run finished", {
+        outcome: how,
+        duration_ms: durationMs,
+        // After a result seven kills the group itself; the exit only explains a run that ended otherwise.
+        ...(how === "exited" && { exit_code: code, signal }),
+        output_lines: logs.lines.length,
+        ...(!result.ok && { error: preview(result.error, 300) }),
+      });
+      resolve({ ...result, logs: logs.lines, durationMs });
     });
     child.on("error", (err) => {
       clearTimeout(timer);
       live.delete(child);
       finished = true;
+      log.error("run could not start", { error: err });
       resolve({ ok: false, error: `could not start the run: ${err.message}`, logs: [], durationMs: 0 });
     });
   });
 
   return {
+    id,
     done,
     startedAt,
     state: () => (finished ? "done" : "running"),
@@ -244,9 +303,24 @@ function startChild(run: ChildRun): RunHandle {
     kill: () => {
       if (finished || outcome) return;
       killed = true;
+      log.info("run kill requested");
       killGroup(child);
     },
   };
+}
+
+/** How a run ended, for its "run finished" line. */
+function endedHow(
+  result: { ok: boolean },
+  killed: boolean,
+  timedOut: boolean,
+  returned: boolean,
+): "ok" | "error" | "killed" | "timeout" | "exited" {
+  if (result.ok) return "ok";
+  if (returned) return "error"; // the module threw or rejected
+  if (killed) return "killed";
+  if (timedOut) return "timeout";
+  return "exited";
 }
 
 async function callHost(

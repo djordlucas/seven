@@ -126,7 +126,13 @@ export function agentBuiltins(): Builtin[] {
           from = r.id;
         }
         const timeoutMs = Math.min(positive(a.timeout_ms, 60_000), MAX_WAIT_MS);
+        const started = performance.now();
         const msg = await ctx.supervisor.waitMessage(ctx.agentId, { from, timeoutMs, signal: ctx.signal });
+        ctx.log.info("waited for a message", {
+          from: from ?? "anyone",
+          got: msg ? msg.sender : null,
+          waited_ms: Math.round(performance.now() - started),
+        });
         return msg ? ctx.supervisor.formatInbox(msg) : `no message within ${timeoutMs}ms`;
       },
     },

@@ -44,6 +44,7 @@ npm start -- serve            # run every agent, headless
 npm start -- agents           # list agents
 npm start -- send a2 "hi"     # message an agent, even while another seven runs
 npm start -- tools            # list generated tools
+npm start -- logs -f          # follow seven's log
 ```
 
 ## How it works
@@ -53,6 +54,7 @@ npm start -- tools            # list generated tools
 | Agent loop | Model call → tool calls → results, repeated until the model answers; the tool list is re-read every step | [architecture.md](docs/architecture.md) |
 | Agents | Any number at once: request, sequence or continuous agents, spawned by any agent, found with `find_agents`, talked to with `send_message` / `wait_message` | [multi-agent.md](docs/multi-agent.md) |
 | Generated tools | ES modules any agent writes with `define_tool`, shared by all agents | [architecture.md](docs/architecture.md#generated-tools) |
+| Logging | Structured JSON lines from every component, traced by agent, turn, step and run; `seven logs` filters and follows them | [logging.md](docs/logging.md) |
 | Data | Seven's state in `.seven/seven.db`; agents and tools use their own SQLite databases through `sql` and `seven.db()` | [data.md](docs/data.md) |
 | Misbehaving tools | Every run is recorded; `tool_health` shows a tool's failures and durations, `disable_tool` takes it out of the tool list, and a tool can declare its own `timeout_ms` | [architecture.md](docs/architecture.md#misbehaving-tools) |
 | Sync and async calls | A direct call waits for the result; `start_tool` returns a run id to check with `run_status` / `wait_run` and stop with `kill_run` | [architecture.md](docs/architecture.md#sync-and-async-calls) |

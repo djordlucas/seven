@@ -10,6 +10,7 @@ import { builtinModules } from "node:module";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { build, type Plugin } from "esbuild";
+import { type Logger, noopLogger } from "../log.ts";
 
 const run = promisify(execFile);
 const BUILTINS = new Set(builtinModules);
@@ -24,14 +25,28 @@ export interface Package {
  * imported but not listed gets `latest`). Returns the top-level packages with
  * the version now installed.
  */
-export async function installDeps(home: string, source: string, deps: Record<string, string> = {}): Promise<Package[]> {
+export async function installDeps(
+  home: string,
+  source: string,
+  deps: Record<string, string> = {},
+  log: Logger = noopLogger,
+): Promise<Package[]> {
   const names = [...new Set([...(await scanImports(source)), ...Object.keys(deps)])].sort();
   const missing = names.filter((n) => deps[n] !== undefined || !installedVersion(home, n));
-  if (missing.length > 0)
-    await install(
-      home,
-      missing.map((n) => `${n}@${deps[n] ?? "latest"}`),
-    );
+  if (missing.length > 0) {
+    const specs = missing.map((n) => `${n}@${deps[n] ?? "latest"}`);
+    const started = performance.now();
+    try {
+      await install(home, specs);
+    } catch (err) {
+      log.error("package install failed", { packages: specs, error: err });
+      throw err;
+    }
+    log.info("packages installed", {
+      packages: missing.map((n) => `${n}@${installedVersion(home, n) ?? "?"}`),
+      duration_ms: Math.round(performance.now() - started),
+    });
+  }
   return names.map((name) => ({ name, version: installedVersion(home, name) ?? "unknown" }));
 }
 

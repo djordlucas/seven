@@ -32,9 +32,17 @@ export function sqlBuiltins(): Builtin[] {
         if (file.startsWith("error:")) return file;
         fs.mkdirSync(path.dirname(file), { recursive: true });
         const db = new DatabaseSync(file);
+        const started = performance.now();
+        const fields = () => ({
+          db: path.relative(ctx.workspace, file),
+          duration_ms: Math.round(performance.now() - started),
+        });
         try {
-          return run(db, String(a.query), a.params, a.named);
+          const out = run(db, String(a.query), a.params, a.named);
+          ctx.log.info("sql", { ...fields(), statement: String(a.query).trim().split(/\s+/)[0]?.toUpperCase() });
+          return out;
         } catch (err) {
+          ctx.log.warn("sql failed", { ...fields(), error: err instanceof Error ? err.message : String(err) });
           return `error: ${err instanceof Error ? err.message : String(err)}`;
         } finally {
           db.close();

@@ -7,6 +7,7 @@
 //   seven agents [--all]        list agents
 //   seven send <agent> <text>   message an agent; works while another seven runs
 //   seven tools                 list generated tools
+//   seven logs [filters] [-f]   read seven's log (see docs/logging.md)
 //
 // Only one process at a time runs agents (interactive, one message, serve);
 // the others only read and write the state database.
@@ -18,6 +19,8 @@ import { ROOT, type SupervisorEvent } from "./agent/supervisor.ts";
 import { createSeven } from "./app.ts";
 import { loadConfig } from "./config.ts";
 import { Mistral } from "./llm/mistral.ts";
+import { createLogger, fileSink, type Level, type Sink, stderrSink } from "./log.ts";
+import { follow, format, type LogFilter, matches, parse, readLines } from "./logs.ts";
 import { State, TERMINAL } from "./state/db.ts";
 import { ToolStore } from "./tools/store.ts";
 
@@ -25,6 +28,42 @@ const cfg = loadConfig();
 const [command, ...rest] = process.argv.slice(2);
 
 // ── commands that do not run agents ─────────────────────────────────────────
+
+if (command === "logs") {
+  if (!cfg.logFile) {
+    console.error("seven: logging to a file is off (SEVEN_LOG_FILE=off)");
+    process.exit(2);
+  }
+  const flag = (name: string) => {
+    const i = rest.indexOf(name);
+    return i >= 0 ? rest[i + 1] : undefined;
+  };
+  const filter: LogFilter = {
+    agent: flag("--agent"),
+    turn: flag("--turn"),
+    run: flag("--run"),
+    level: flag("--level") as Level | undefined,
+    grep: flag("--grep"),
+  };
+  const json = rest.includes("--json");
+  const color = !json && process.stdout.isTTY;
+  const print = (line: string) => {
+    const r = parse(line);
+    if (r && matches(r, line, filter)) console.log(json ? line : format(r, color));
+  };
+  const tail = Number(flag("--tail") ?? 100);
+  const lines = readLines(cfg.logFile).filter((l) => {
+    const r = parse(l);
+    return r !== undefined && matches(r, l, filter);
+  });
+  for (const line of tail > 0 ? lines.slice(-tail) : lines)
+    console.log(json ? line : format(parse(line) as never, color));
+  if (rest.includes("-f") || rest.includes("--follow")) {
+    follow(cfg.logFile, print);
+    await new Promise(() => {}); // until interrupted
+  }
+  process.exit(0);
+}
 
 if (command === "tools" || command === "agents" || command === "send") {
   const state = new State(cfg.stateDb);
@@ -64,13 +103,36 @@ if (!cfg.apiKey) {
   process.exit(2);
 }
 
+const sinks: Sink[] = [];
+if (cfg.logFile) sinks.push(fileSink(cfg.logFile));
+if (cfg.logStderr ?? command === "serve") sinks.push(stderrSink());
+const log = createLogger({ level: cfg.logLevel, sinks, bindings: { pid: process.pid } });
+process.on("uncaughtException", (err) => {
+  log.error("uncaught exception", { error: err });
+  console.error(err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => log.error("unhandled rejection", { error: err }));
+
 const model = new Mistral({ apiKey: cfg.apiKey, model: cfg.model, endpoint: cfg.endpoint });
-const seven = createSeven(cfg, model, show);
+const seven = createSeven(cfg, model, show, log);
 const lease = seven.state.acquireLease();
 if (!lease.ok) {
+  log.warn("lease held by another process", { holder: lease.pid });
   console.error(`seven: another seven (pid ${lease.pid}) is running agents in this workspace`);
   process.exit(1);
 }
+log.info("seven started", {
+  command: command === undefined ? "interactive" : command === "serve" ? "serve" : "message",
+  model: cfg.model,
+  endpoint: cfg.endpoint,
+  workspace: cfg.workspace,
+  node: process.versions.node,
+  log_level: cfg.logLevel,
+  max_agents: cfg.maxAgents,
+  llm_concurrency: cfg.llmConcurrency,
+  ...(lease.tookOverFrom && { took_lease_from: lease.tookOverFrom }),
+});
 const heartbeat = setInterval(() => seven.state.heartbeat(), 5000);
 seven.supervisor.start();
 
@@ -81,6 +143,7 @@ async function close(code = 0): Promise<never> {
     clearInterval(heartbeat);
     await seven.supervisor.shutdown();
     seven.state.releaseLease();
+    log.info("seven stopped", { exit_code: code });
     seven.state.close();
   }
   process.exit(code);

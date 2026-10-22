@@ -13,6 +13,7 @@ workspace; seven's database is not open to them.
 | `.seven/seven.db` | Seven's state (below) | Seven |
 | `.seven/tools/<name>/r<revision>.ts` | Each generated tool revision's source, the file the runner imports | Seven, from the `tools` table |
 | `.seven/node_modules`, `.seven/package.json` | npm packages runs import | The runner's installs |
+| `.seven/logs/seven.log`, `seven.log.1` | The structured log (`logging.md`) | Seven |
 | `.seven/tmp/` | Temporary files for `run_js` and trial runs, deleted after the run | The runner |
 | anything else | The agents' files and databases | Agents and tools |
 
