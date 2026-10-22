@@ -105,4 +105,71 @@ describe("agent", () => {
     const { agent } = setup(replies);
     assert.match(await agent.send("loop"), /Stopped after 10 steps/);
   });
+
+  it("starts a run in the background, waits for it, and reports it", async () => {
+    const { agent, model } = setup([
+      call("f1", "start_tool", {
+        tool: "run_js",
+        args: { code: `console.log("working"); await new Promise((r) => setTimeout(r, 200)); export default "fin"` },
+      }),
+      call("f2", "wait_run", { id: "r1", timeout_ms: 10_000 }),
+      call("f3", "list_runs", {}),
+      { role: "assistant", content: "done" },
+    ]);
+    await agent.send("go");
+
+    const results = model.seen
+      .at(-1)
+      ?.messages.filter((m) => m.role === "tool")
+      .map((m) => m.content);
+    assert.equal(results?.[0], "started r1 (run_js)");
+    assert.match(
+      String(results?.[1]),
+      /^r1 run_js: finished in \d+\.\ds, ok\nfin\n--- output \(1 lines\) ---\nworking$/,
+    );
+    assert.match(String(results?.[2]), /^r1 run_js: finished in \d+\.\ds, ok$/, "checked, so no longer flagged");
+  });
+
+  it("shows a running run's status, kills it, and lists it in the system prompt meanwhile", async () => {
+    const { agent, model } = setup([
+      call("g1", "start_tool", {
+        tool: "run_js",
+        args: { code: `setInterval(() => console.log("tick"), 20); export default new Promise(() => {})` },
+      }),
+      call("g2", "wait_run", { id: "r1", timeout_ms: 500 }),
+      call("g3", "kill_run", { id: "r1" }),
+      { role: "assistant", content: "stopped it" },
+    ]);
+    await agent.send("go");
+
+    const tool = (i: number) => String(model.seen[i]?.messages.at(-1)?.content);
+    assert.match(tool(2), /^r1 run_js: running for \d+\.\ds\n--- output \(\d+ lines\) ---\ntick/);
+    assert.match(tool(3), /^killed r1\nr1 run_js: finished in \d+\.\ds, failed: killed\nerror: killed/);
+    assert.match(String(model.seen[2]?.messages[0]?.content), /## Your background runs[\s\S]*- r1 run_js: running for/);
+    assert.doesNotMatch(String(model.seen[3]?.messages[0]?.content), /## Your background runs/);
+  });
+
+  it("starts one of its own tools in the background", async () => {
+    const { agent, model } = setup([
+      call("h1", "define_tool", {
+        name: "add",
+        description: "Adds.",
+        parameters: { type: "object" },
+        code: "export default ({ a, b }: { a: number; b: number }) => a + b",
+      }),
+      call("h2", "start_tool", { tool: "add", args: { a: 2, b: 3 } }),
+      call("h3", "wait_run", { id: "r1" }),
+      call("h4", "start_tool", { tool: "define_tool", args: {} }),
+      call("h5", "run_status", { id: "r9" }),
+      { role: "assistant", content: "5" },
+    ]);
+    await agent.send("go");
+    const results = model.seen
+      .at(-1)
+      ?.messages.filter((m) => m.role === "tool")
+      .map((m) => m.content);
+    assert.match(String(results?.[2]), /^r1 add: finished in .*, ok\n5$/);
+    assert.equal(results?.[3], 'error: no tool named "define_tool" that can run in the background');
+    assert.equal(results?.[4], 'error: no run "r9"');
+  });
 });

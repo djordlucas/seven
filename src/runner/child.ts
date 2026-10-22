@@ -49,7 +49,8 @@ process.on("message", async (m: ToChild) => {
 
   try {
     const mod = await import(pathToFileURL(m.file).href);
-    const out = typeof mod.default === "function" ? await mod.default(m.args) : mod.default;
+    // A non-function default export may itself be a promise; it is awaited too.
+    const out = await (typeof mod.default === "function" ? mod.default(m.args) : mod.default);
     send({ type: "result", ok: true, json: JSON.stringify(out === undefined ? null : out) ?? "null" });
   } catch (err) {
     send({ type: "result", ok: false, error: describe(err) });

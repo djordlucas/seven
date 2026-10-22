@@ -5,8 +5,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ToolDef } from "../llm/mistral.ts";
-import type { Runner, RunResult } from "../runner/index.ts";
+import type { RunHandle, Runner, RunResult } from "../runner/index.ts";
 import { TOOL_NAME, type ToolStore } from "../tools/store.ts";
+import { describe, type RunTable, summarize } from "./runs.ts";
 
 export interface Builtin extends ToolDef {
   run(args: Record<string, unknown>): Promise<string>;
@@ -18,7 +19,7 @@ const depsSchema = {
   additionalProperties: { type: "string" },
 };
 
-export function builtins(runner: Runner, store: ToolStore): Builtin[] {
+export function builtins(runner: Runner, store: ToolStore, runs: RunTable): Builtin[] {
   const names = new Set<string>();
   const list: Builtin[] = [
     {
@@ -112,6 +113,105 @@ export function builtins(runner: Runner, store: ToolStore): Builtin[] {
         return store.remove(String(a.name)) ? `deleted ${String(a.name)}` : `error: no tool named "${String(a.name)}"`;
       },
     },
+    {
+      name: "start_tool",
+      description:
+        "Start a tool in the background and return a run id at once, instead of waiting for its result. " +
+        "Works for any of your tools and for run_js. Use it for anything slow, long-running or that might hang; " +
+        "then check it with run_status or wait_run, and stop it with kill_run.",
+      parameters: {
+        type: "object",
+        properties: {
+          tool: { type: "string", description: "A tool you built, or run_js." },
+          args: { type: "object", description: "The tool's arguments (for run_js: code, args, deps)." },
+          timeout_ms: {
+            type: "integer",
+            description: "Kill the run after this long. Defaults to the normal run limit.",
+          },
+        },
+        required: ["tool"],
+      },
+      async run(a) {
+        const tool = String(a.tool);
+        const args = (a.args as Record<string, unknown> | undefined) ?? {};
+        const timeoutMs = typeof a.timeout_ms === "number" && a.timeout_ms > 0 ? a.timeout_ms : undefined;
+        let handle: RunHandle;
+        if (tool === "run_js") {
+          handle = runner.startEval(String(args.code ?? ""), { args: args.args, deps: asDeps(args.deps), timeoutMs });
+        } else {
+          const own = store.get(tool);
+          if (!own) return `error: no tool named "${tool}"${names.has(tool) ? " that can run in the background" : ""}`;
+          handle = runner.startFile(own.file, args, timeoutMs);
+        }
+        const run = runs.add(tool, handle);
+        return `started ${run.id} (${tool})`;
+      },
+    },
+    {
+      name: "run_status",
+      description: "Show a background run: whether it is still going, its result once finished, and its latest output.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The run id from start_tool, e.g. r3." },
+          tail: { type: "integer", description: "Output lines to show, from the end. Default 50." },
+        },
+        required: ["id"],
+      },
+      async run(a) {
+        const run = runs.get(String(a.id));
+        if (!run) return `error: no run "${String(a.id)}"`;
+        return describe(run, positive(a.tail, 50));
+      },
+    },
+    {
+      name: "wait_run",
+      description:
+        "Wait for a background run to finish, up to timeout_ms, then show its status as run_status does. " +
+        "Waiting does not stop the run.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          timeout_ms: { type: "integer", description: `How long to wait. Default 30000, at most ${MAX_WAIT_MS}.` },
+          tail: { type: "integer", description: "Output lines to show, from the end. Default 50." },
+        },
+        required: ["id"],
+      },
+      async run(a) {
+        const run = runs.get(String(a.id));
+        if (!run) return `error: no run "${String(a.id)}"`;
+        const wait = Math.min(positive(a.timeout_ms, 30_000), MAX_WAIT_MS);
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([run.handle.done, new Promise((r) => (timer = setTimeout(r, wait)))]);
+        clearTimeout(timer);
+        await Promise.resolve(); // let the run table record a result that just arrived
+        return describe(run, positive(a.tail, 50));
+      },
+    },
+    {
+      name: "kill_run",
+      description: "Stop a background run and everything it started.",
+      parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+      async run(a) {
+        const run = runs.get(String(a.id));
+        if (!run) return `error: no run "${String(a.id)}"`;
+        if (run.result) return `${run.id} had already finished\n${describe(run, 20)}`;
+        run.handle.kill();
+        await run.handle.done;
+        await Promise.resolve();
+        return `killed ${run.id}\n${describe(run, 20)}`;
+      },
+    },
+    {
+      name: "list_runs",
+      description: "List background runs: running ones and recently finished ones.",
+      parameters: { type: "object", properties: {} },
+      async run() {
+        const all = runs.list();
+        return all.length === 0 ? "no background runs" : all.map((r) => summarize(r)).join("\n");
+      },
+    },
   ];
   for (const b of list) names.add(b.name);
   return list;
@@ -135,6 +235,12 @@ export function formatRun(r: RunResult): string {
   else parts.push(`error: ${r.error}`);
   if (r.logs.length > 0) parts.push(`--- output ---\n${r.logs.join("\n")}`);
   return parts.join("\n");
+}
+
+const MAX_WAIT_MS = 300_000;
+
+function positive(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
 }
 
 function asDeps(v: unknown): Record<string, string> | undefined {

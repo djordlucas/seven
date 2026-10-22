@@ -12,9 +12,10 @@
 [![Status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)](#project-status)
 
 Seven is an **experiment in an LLM agent that builds itself**. It starts with
-four tools — run code, and define, read and delete its own tools — and when a
-task needs a capability it lacks, it writes a tool for it, saves it, and uses it
-on its next step. Every piece of code the model writes runs in its own Node.js
+only the tools to run code, manage its own tools and control background runs.
+When a task needs a capability it lacks, it writes a tool for it, saves it, and
+uses it on its next step, either synchronously or as a background run it can
+check on and kill. Every piece of code the model writes runs in its own Node.js
 child process, with all of Node and any npm package. The model is Mistral's, through its hosted API.
 
 Seven is a Node.js (TypeScript) program, and it runs and is developed in Docker.
@@ -46,6 +47,7 @@ npm start -- tools            # list generated tools
 |------|------------|-----|
 | Agent loop | Model call → tool calls → results, repeated until the model answers; the tool list is re-read every step | [architecture.md](docs/architecture.md) |
 | Generated tools | ES modules the agent writes with `define_tool`, saved under `$SEVEN_HOME/tools/` | [architecture.md](docs/architecture.md#generated-tools) |
+| Sync and async calls | A direct call waits for the result; `start_tool` returns a run id to check with `run_status` / `wait_run` and stop with `kill_run` | [architecture.md](docs/architecture.md#sync-and-async-calls) |
 | Runner | One Node.js child process per run, killed with everything it spawned when the result is back; TypeScript; npm imports installed automatically; `seven.llm.chat` for calling the model | [runner.md](docs/runner.md) |
 | Docker | `dev` and `runtime` targets from one pinned Node image | [docker.md](docs/docker.md) |
 

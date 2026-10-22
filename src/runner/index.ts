@@ -40,17 +40,38 @@ export interface RunResult {
   durationMs: number;
 }
 
+/** A run in progress, or finished. */
+export interface RunHandle {
+  /** Resolves when the run ends, however it ends. Never rejects. */
+  readonly done: Promise<RunResult>;
+  /** `Date.now()` when the run was started. */
+  readonly startedAt: number;
+  /** `installing` (packages), `running` (the process), or `done`. */
+  state(): "installing" | "running" | "done";
+  /** Complete output lines so far; the final logs once done. */
+  logs(): string[];
+  /** Kill the run and everything it spawned; it fails with `killed`. No effect once done. */
+  kill(): void;
+}
+
+export interface EvalOptions {
+  args?: unknown;
+  deps?: Record<string, string>;
+  timeoutMs?: number;
+}
+
 export interface Runner {
   readonly home: string;
   /** Install the packages `source` imports (and `deps`). */
   install(source: string, deps?: Record<string, string>): Promise<Package[]>;
-  /** Run a module file that is already under `home`. */
-  runFile(file: string, args?: unknown, timeoutMs?: number): Promise<RunResult>;
+  /** Start a module file that is already under `home`. */
+  startFile(file: string, args?: unknown, timeoutMs?: number): RunHandle;
   /** Install, write to a temporary file, run, delete. An install failure is a failed run. */
-  eval(
-    source: string,
-    opts?: { args?: unknown; deps?: Record<string, string>; timeoutMs?: number },
-  ): Promise<RunResult>;
+  startEval(source: string, opts?: EvalOptions): RunHandle;
+  /** `startFile(...).done`. */
+  runFile(file: string, args?: unknown, timeoutMs?: number): Promise<RunResult>;
+  /** `startEval(...).done`. */
+  eval(source: string, opts?: EvalOptions): Promise<RunResult>;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -68,8 +89,8 @@ export function createRunner(opts: RunnerOptions): Runner {
   const runner: Runner = {
     home,
     install: (source, deps) => installDeps(home, source, deps),
-    runFile: (file, args, timeoutMs) =>
-      runChild({
+    startFile: (file, args, timeoutMs) =>
+      startChild({
         file: path.resolve(file),
         args,
         cwd: opts.cwd,
@@ -77,23 +98,53 @@ export function createRunner(opts: RunnerOptions): Runner {
         timeoutMs: timeoutMs ?? opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         memoryMb: opts.memoryMb ?? DEFAULT_MEMORY_MB,
       }),
-    async eval(source, { args, deps, timeoutMs } = {}) {
-      try {
-        await runner.install(source, deps);
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err), logs: [], durationMs: 0 };
-      }
-      const file = path.join(tmp, `run-${randomUUID()}.ts`);
-      fs.writeFileSync(file, source);
-      try {
-        return await runner.runFile(file, args, timeoutMs);
-      } finally {
-        fs.rmSync(file, { force: true });
-      }
+    startEval(source, { args, deps, timeoutMs } = {}) {
+      // Installing comes first and can take a while, so the handle exists
+      // before the process does; a kill during the install cancels the run.
+      const startedAt = Date.now();
+      let child: RunHandle | undefined;
+      let killed = false;
+      let finished = false;
+      const done = (async (): Promise<RunResult> => {
+        try {
+          await runner.install(source, deps);
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err), logs: [], durationMs: 0 };
+        }
+        if (killed) return { ok: false, error: "killed", logs: [], durationMs: 0 };
+        const file = path.join(tmp, `run-${randomUUID()}.ts`);
+        fs.writeFileSync(file, source);
+        try {
+          child = runner.startFile(file, args, timeoutMs);
+          return await child.done;
+        } finally {
+          fs.rmSync(file, { force: true });
+        }
+      })().finally(() => {
+        finished = true;
+      });
+      return {
+        done,
+        startedAt,
+        state: () => (finished ? "done" : child ? "running" : "installing"),
+        logs: () => child?.logs() ?? [],
+        kill: () => {
+          killed = true;
+          child?.kill();
+        },
+      };
     },
+    runFile: (file, args, timeoutMs) => runner.startFile(file, args, timeoutMs).done,
+    eval: (source, evalOpts) => runner.startEval(source, evalOpts).done,
   };
   return runner;
 }
+
+// Every live run's process, so none outlives seven itself.
+const live = new Set<ChildProcess>();
+process.once("exit", () => {
+  for (const child of live) killGroup(child);
+});
 
 interface ChildRun {
   file: string;
@@ -104,7 +155,8 @@ interface ChildRun {
   memoryMb: number;
 }
 
-function runChild(run: ChildRun): Promise<RunResult> {
+function startChild(run: ChildRun): RunHandle {
+  const startedAt = Date.now();
   const started = performance.now();
   const child = spawn(
     process.execPath,
@@ -124,12 +176,15 @@ function runChild(run: ChildRun): Promise<RunResult> {
     },
   );
 
+  live.add(child);
   const logs = new LogCollector();
   child.stdout?.on("data", (b: Buffer) => logs.add("", b));
   child.stderr?.on("data", (b: Buffer) => logs.add("[stderr] ", b));
 
   let outcome: { ok: boolean; value?: unknown; error?: string } | undefined;
   let timedOut = false;
+  let killed = false;
+  let finished = false;
   const timer = setTimeout(() => {
     timedOut = true;
     killGroup(child);
@@ -150,14 +205,17 @@ function runChild(run: ChildRun): Promise<RunResult> {
 
   child.send({ type: "start", file: run.file, args: run.args ?? {} } satisfies ToChild);
 
-  return new Promise((resolve) => {
+  const done = new Promise<RunResult>((resolve) => {
     // "close" fires after stdio has drained, so the logs are complete.
     child.on("close", (code, signal) => {
       clearTimeout(timer);
+      live.delete(child);
+      finished = true;
       logs.flush();
       let result = outcome;
       if (!result) {
-        if (timedOut) result = { ok: false, error: `timed out after ${run.timeoutMs}ms` };
+        if (killed) result = { ok: false, error: "killed" };
+        else if (timedOut) result = { ok: false, error: `timed out after ${run.timeoutMs}ms` };
         else {
           const how = signal ? `signal ${signal}` : `code ${code}`;
           const tail = logs.stderrTail(20);
@@ -168,9 +226,23 @@ function runChild(run: ChildRun): Promise<RunResult> {
     });
     child.on("error", (err) => {
       clearTimeout(timer);
+      live.delete(child);
+      finished = true;
       resolve({ ok: false, error: `could not start the run: ${err.message}`, logs: [], durationMs: 0 });
     });
   });
+
+  return {
+    done,
+    startedAt,
+    state: () => (finished ? "done" : "running"),
+    logs: () => [...logs.lines],
+    kill: () => {
+      if (finished || outcome) return;
+      killed = true;
+      killGroup(child);
+    },
+  };
 }
 
 async function callHost(
