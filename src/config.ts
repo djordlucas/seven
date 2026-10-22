@@ -17,6 +17,8 @@ export interface Config {
   stateDb: string;
   /** Model calls one turn may take before it is stopped. */
   maxSteps: number;
+  /** The model's context window, in tokens; an agent's conversation is compacted to fit it. */
+  contextTokens: number;
   /** Wall-clock budget of one run. */
   runTimeoutMs: number;
   /** V8 heap cap of one run, in MiB. */
@@ -44,6 +46,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     home,
     stateDb: path.join(home, "seven.db"),
     maxSteps: int(env.SEVEN_MAX_STEPS, 40),
+    contextTokens: int(env.SEVEN_CONTEXT_TOKENS, 128_000),
     runTimeoutMs: int(env.SEVEN_RUN_TIMEOUT_MS, 60_000),
     runMemoryMb: int(env.SEVEN_RUN_MEMORY_MB, 1024),
     maxAgents: int(env.SEVEN_MAX_AGENTS, 16),

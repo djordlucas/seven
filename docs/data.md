@@ -24,14 +24,18 @@ while another process runs agents.
 
 | Table | One row per |
 |-------|-------------|
-| `agents` | Agent: id, name, description, instructions, parent, mode, status, interval, step limit, result, error, times |
-| `messages` | Message in an agent's conversation, in order, as sent to the model |
+| `agents` | Agent: id, name, description, instructions, parent, mode, status, interval, step limit, result, error, times; the summary of its compacted messages, where its context starts, and how often it was compacted |
+| `messages` | Message in an agent's conversation, in order, as sent to the model; compacted ones stay |
 | `inbox` | Task or message queued for an agent, with its sender and when it was delivered |
 | `tools` | Generated tool: definition, source, revision, run limit, disabled reason |
 | `tool_runs` | Finished run of a generated tool: revision, calling agent, sync or async, outcome, duration, first error line; the newest 100 per tool are kept |
 | `runs` | Background run: agent, tool, status, result, last 500 output lines |
 | `lease` | The process running agents, and its last heartbeat |
 | `meta` | Schema version and the counters behind agent and run ids |
+
+The schema is at version 2. A database is created at version 1 and brought up
+to date by migrations, in order, in one transaction when seven opens it; one
+from a newer seven is refused.
 
 ## Agent and tool databases
 
@@ -49,6 +53,6 @@ against mistakes, not a permission.
 
 | Limit | Detail |
 |-------|--------|
-| No schema migrations | The schema is version 1, created if missing; a future change needs a migration step that does not exist yet. |
-| No pruning of conversations or inboxes | `messages` and `inbox` grow for as long as an agent lives; `/reset` clears only the root agent's conversation. |
+| No downgrade | Migrations only go forward; an older seven refuses a database a newer one migrated. |
+| No pruning of conversations or inboxes | `messages` and `inbox` grow for as long as an agent lives, compacted messages included; `/reset` clears only the root agent's conversation and summary. |
 | `sql` opens a connection per call | No connection is kept between calls; a transaction cannot span calls. |

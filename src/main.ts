@@ -161,6 +161,8 @@ function show(e: SupervisorEvent): void {
     console.error(styleText("magenta", `+ ${e.agent} "${e.name}" (${e.mode}) spawned by ${e.parent}`));
   } else if (e.type === "finished") {
     console.error(styleText("magenta", `- ${e.agent} ${e.status}: ${clip(e.detail, 300)}`));
+  } else if (e.type === "compacted") {
+    console.error(`${who}${styleText("dim", `⋯ context compacted: ${e.folded} messages summarized, ${e.kept} kept`)}`);
   } else if (e.type === "message" && e.to === ROOT) {
     console.error(styleText("yellow", `✉ ${e.from} → seven: ${clip(e.text, 300)}`));
   }
@@ -195,7 +197,7 @@ if (command === "serve") {
   const root = seven.supervisor.root();
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   console.error(
-    styleText("dim", `seven · ${cfg.model} · workspace ${cfg.workspace} · /agents, /reset, ctrl-d to exit`),
+    styleText("dim", `seven · ${cfg.model} · workspace ${cfg.workspace} · /agents, /compact, /reset, ctrl-d to exit`),
   );
   if (root.needsResume()) console.log(`${await root.turn()}\n`);
   for (;;) {
@@ -206,6 +208,15 @@ if (command === "serve") {
     if (text === "/agents") {
       for (const a of seven.supervisor.list(false)) {
         console.log(`${a.id}  ${a.name}  ${a.mode}  ${a.status}  ${a.description}`);
+      }
+      continue;
+    }
+    if (text === "/compact") {
+      try {
+        const out = await root.compact("manual");
+        if (!out) console.log("nothing to compact");
+      } catch (err) {
+        console.error(styleText("red", err instanceof Error ? err.message : String(err)));
       }
       continue;
     }

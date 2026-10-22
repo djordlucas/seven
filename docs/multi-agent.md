@@ -82,7 +82,7 @@ wait. Tool runs are separate child processes, so they execute in parallel.
 
 | Command | Does |
 |---------|------|
-| `seven` | Interactive session with the root agent, and every other agent running. `/agents` lists active agents; `/reset` clears the root agent's conversation. |
+| `seven` | Interactive session with the root agent, and every other agent running. `/agents` lists active agents; `/compact` compacts the root agent's conversation (`compaction.md`); `/reset` clears it. |
 | `seven "<message>"` | One root turn, then exit. Agents still active are interrupted and resume at the next start. |
 | `seven serve` | Runs every agent without a terminal until SIGINT or SIGTERM. |
 | `seven agents [--all]` | Lists agents, with the number of inbox items waiting. Does not run agents. |
@@ -114,7 +114,7 @@ background) and marks background runs lost.
 | Limit | Detail |
 |-------|--------|
 | One process per workspace | Agents run in the process holding the lease; there is no distribution across machines. |
-| No context management | Each agent sends its whole conversation on every step; a long-lived agent eventually exceeds the model's context window and its turns fail. |
+| Lossy memory | A long-lived agent's older messages are compacted into a summary; what the summary leaves out is gone from its view (`compaction.md`). |
 | The root agent does not react on its own | A message to the idle root agent waits for the user's next turn. |
 | Polling | Inbox delivery has up to 250 ms latency. |
 | Shared tools, no ownership | Any agent can redefine, disable or delete any tool. |
