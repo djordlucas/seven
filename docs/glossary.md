@@ -8,7 +8,9 @@ The terms below have one meaning each across `docs/`, `spec/` and `adr/`.
 | Turn | One user message and everything the agent loop does until it answers. |
 | Step | One model call within a turn. A turn has at most `SEVEN_MAX_STEPS` steps. |
 | Tool | Anything the model can call by name: a built-in or a generated tool. |
-| Built-in | One of the tools seven ships with: `run_js`, `define_tool`, `read_tool`, `delete_tool`, `start_tool`, `run_status`, `wait_run`, `kill_run`, `list_runs`. |
+| Built-in | One of the tools seven ships with: `run_js`, `define_tool`, `read_tool`, `delete_tool`, `start_tool`, `run_status`, `wait_run`, `kill_run`, `list_runs`, `tool_health`, `disable_tool`, `enable_tool`. |
+| Disabled tool | A generated tool taken out of the model's tool list with a reason, without deleting it. |
+| Run history | A generated tool's `runs.jsonl`: one record per finished run. |
 | Generated tool | A tool the agent wrote with `define_tool`, saved in the tool store. |
 | Tool store | `$SEVEN_HOME/tools/`, one directory per generated tool. |
 | Revision | A generated tool's version counter; it starts at 1 and increments on each redefinition. |

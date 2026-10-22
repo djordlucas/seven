@@ -47,6 +47,7 @@ npm start -- tools            # list generated tools
 |------|------------|-----|
 | Agent loop | Model call → tool calls → results, repeated until the model answers; the tool list is re-read every step | [architecture.md](docs/architecture.md) |
 | Generated tools | ES modules the agent writes with `define_tool`, saved under `$SEVEN_HOME/tools/` | [architecture.md](docs/architecture.md#generated-tools) |
+| Misbehaving tools | Every run is recorded; `tool_health` shows a tool's failures and durations, `disable_tool` takes it out of the tool list, and a tool can declare its own `timeout_ms` | [architecture.md](docs/architecture.md#misbehaving-tools) |
 | Sync and async calls | A direct call waits for the result; `start_tool` returns a run id to check with `run_status` / `wait_run` and stop with `kill_run` | [architecture.md](docs/architecture.md#sync-and-async-calls) |
 | Runner | One Node.js child process per run, killed with everything it spawned when the result is back; TypeScript; npm imports installed automatically; `seven.llm.chat` for calling the model | [runner.md](docs/runner.md) |
 | Docker | `dev` and `runtime` targets from one pinned Node image | [docker.md](docs/docker.md) |

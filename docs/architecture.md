@@ -4,7 +4,7 @@ Seven is a single Node.js process: a CLI driving one agent loop, a Mistral
 client, a tool store on disk, and the runner that runs every piece of code the
 model writes in a child process. The model calls a tool synchronously, waiting
 for its result, or asynchronously with `start_tool`, getting a run id it can
-check, wait on or kill. The agent starts with 9 built-in tools and grows by
+check, wait on or kill. The agent starts with 12 built-in tools and grows by
 writing generated tools, which are saved to the tool store and offered to the
 model from the next step onward.
 
@@ -63,7 +63,7 @@ A turn that reaches `SEVEN_MAX_STEPS` model calls (default 40) ends with
 | Tool | Does |
 |------|------|
 | `run_js` | Runs code once in a child process; returns the result and the process's output. |
-| `define_tool` | Installs a new or revised generated tool's packages and saves it. With `test_args`, runs it first and saves only if that run succeeds. Refuses a name that matches a built-in. |
+| `define_tool` | Installs a new or revised generated tool's packages and saves it. With `test_args`, runs it first and saves only if that run succeeds. With `timeout_ms`, gives the tool its own run limit. Refuses a name that matches a built-in. |
 | `read_tool` | Returns a generated tool's definition and source. |
 | `delete_tool` | Deletes a generated tool. |
 | `start_tool` | Starts a generated tool or `run_js` as a background run and returns its run id at once. Takes an optional `timeout_ms`. |
@@ -71,9 +71,12 @@ A turn that reaches `SEVEN_MAX_STEPS` model calls (default 40) ends with
 | `wait_run` | Waits for a background run to finish, up to `timeout_ms` (default 30 s, at most 300 s), then shows its status. Waiting does not stop the run. |
 | `kill_run` | Kills a background run and its process group; the run fails with `killed`. |
 | `list_runs` | Lists background runs, one line each. |
+| `tool_health` | Shows a generated tool's state, run limit, and its last `last` runs (default 10) with outcome, duration and first error line, plus totals over its recorded history. |
+| `disable_tool` | Disables a generated tool with a reason. |
+| `enable_tool` | Re-enables a disabled tool unchanged. |
 
 The built-ins are deliberately limited to running code, managing generated
-tools, and controlling background runs. Reading files, searching or editing are capabilities the agent writes
+tools, controlling background runs, and handling misbehaving tools. Reading files, searching or editing are capabilities the agent writes
 for itself.
 
 ## Sync and async calls
@@ -105,8 +108,23 @@ uses it.
 
 | File in `$SEVEN_HOME/tools/<name>/` | Contents |
 |-------------------------------------|----------|
-| `tool.json` | Name, description, parameter schema, requested dependency ranges, package versions installed when it was saved, created and updated times, revision |
+| `tool.json` | Name, description, parameter schema, requested dependency ranges, package versions installed when it was saved, created and updated times, revision, optional run limit (`timeoutMs`), and `disabled` (time and reason) while disabled |
 | `source.ts` | The source as the model wrote it, which the runner runs |
+| `runs.jsonl` | One line per finished run: start time, revision, `sync` or `async`, ok, duration, first error line. Kept across redefinitions; trimmed to the newest 100 when it reaches 200. |
+
+## Misbehaving tools
+
+Every run of a generated tool, synchronous or background, is appended to its
+`runs.jsonl`; trial runs from `define_tool` are not. `tool_health` reads it.
+
+A disabled tool stays in the tool store but is left out of the tool list sent
+to the model, and the system prompt names it with its reason. A direct call or
+`start_tool` to it returns
+`error: tool "<name>" is disabled (<reason>). Fix it with define_tool, or enable_tool to use it as is.`
+Redefining the tool clears `disabled`, because the new revision is the fix.
+
+A tool's `timeoutMs` replaces the default run limit (`SEVEN_RUN_TIMEOUT_MS`)
+for every run of that tool; `start_tool`'s own `timeout_ms` overrides both.
 
 ## Configuration
 
@@ -133,5 +151,6 @@ All configuration comes from environment variables; `npm start` and
 | No streaming | Each model reply arrives whole. |
 | Sequential tool calls | Tool calls in one reply run one after another; `start_tool` is how work overlaps. |
 | Background runs are not persisted | They live in the seven process's memory; a restart loses their ids, results and output. |
+| No automatic disabling | Seven does not disable a tool on its own, however often it fails; the model decides from `tool_health`. |
 | No push notification | The model learns that a background run finished from the system prompt at its next step, or by asking; nothing interrupts a step in progress. |
 | No self-modification of seven's own source | The agent extends itself through generated tools only; it does not edit `src/`. |
