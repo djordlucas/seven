@@ -1,0 +1,14 @@
+node_modules/
+
+# seven's own state when run from the repo: generated tools and the npm cache
+# for guest dependencies (SEVEN_HOME, default ./.seven).
+/.seven/
+
+# The dev container's workspace (compose.yaml mounts it at /workspace).
+/workspace/
+
+# Environment files
+.env
+
+*.log
+/tmp

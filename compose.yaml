@@ -1,0 +1,43 @@
+# Development and local runs. See docs/docker.md.
+#
+#   docker compose run --rm dev            shell in the toolchain, repo at /app
+#   docker compose run --rm seven          the agent, interactive
+#
+# Both read .env when it exists.
+
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    image: seven:dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      # The container's own node_modules: the host's is built for the host
+      # platform (esbuild ships a native binary per OS and CPU).
+      - dev-node-modules:/app/node_modules
+      - ./workspace:/workspace
+    env_file:
+      - path: .env
+        required: false
+    stdin_open: true
+    tty: true
+
+  seven:
+    build:
+      context: .
+      target: runtime
+    image: seven:latest
+    volumes:
+      - seven-data:/data
+      - ./workspace:/workspace
+    env_file:
+      - path: .env
+        required: false
+    stdin_open: true
+    tty: true
+
+volumes:
+  dev-node-modules:
+  seven-data:
