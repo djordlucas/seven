@@ -10,7 +10,7 @@
 # Node runs the TypeScript sources directly, so there is no build stage.
 # The base is pinned to an exact tag; dependabot proposes bumps.
 
-FROM node:24.21.0-bookworm-slim AS base
+FROM node:26.12.0-bookworm-slim AS base
 ENV npm_config_update_notifier=false \
     npm_config_fund=false \
     npm_config_audit=false
