@@ -107,7 +107,7 @@ gate.
 
 ## Python
 
-- Python **3.11+** (`pyproject.toml`); the package is `seven/`, divided by
+- Python **3.15+** (latest stable; `pyproject.toml`); the package is `seven/`, divided by
   component into `core/` `execution/` `tools/` `agent/` `api/` (layout above);
   tests in `tests/` with `pytest` + `pytest-asyncio` (`asyncio_mode = "auto"`
   in `pyproject.toml`).
@@ -122,5 +122,5 @@ gate.
 
 ## Docker
 
-`Dockerfile` builds one `python:3.12-slim` image that serves on 8000;
+`Dockerfile` builds one `python:3.15-slim` image that serves on 8000;
 `compose.yaml` mounts `./workspace` and reads `.env`.
