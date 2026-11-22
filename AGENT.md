@@ -100,8 +100,9 @@ gate.
 - The runner spawns `python -m seven._child` per run; the request crosses on
   stdin, host calls and the result on a passed fd, stdout/stderr are the run's
   captured output.
-- Configuration comes from the environment only (`seven/config.py`); `.env` is
-  read by compose, not by the code.
+- Configuration comes from the environment (`seven/config.py`); a `.env` file
+  in the current directory is also read, without overriding variables already
+  set in the environment (compose passes `.env` through `env_file` as well).
 
 ## Docker
 

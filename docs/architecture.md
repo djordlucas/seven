@@ -132,8 +132,10 @@ for every run of that tool; `start_tool`'s own `timeout_ms` overrides both.
 
 ## Configuration
 
-All configuration comes from environment variables; `compose.yaml` reads
-`.env` when it exists.
+All configuration comes from environment variables. A `.env` file in the
+current directory is also read when it exists, without overriding variables
+already set in the environment; `compose.yaml` passes `.env` through
+`env_file` as well.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|

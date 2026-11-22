@@ -81,8 +81,23 @@ class Config:
         }
 
 
+def _load_dotenv(path: Path, env: dict) -> None:
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in env:
+            env[key] = value
+
+
 def load_config(env: dict | None = None) -> Config:
-    env = os.environ if env is None else env
+    env = dict(os.environ) if env is None else dict(env)
+    _load_dotenv(Path.cwd() / ".env", env)
     workspace = Path(env.get("SEVEN_WORKSPACE") or os.getcwd()).resolve()
     log_file_env = env.get("SEVEN_LOG_FILE")
     log_file = None if log_file_env == "off" else (workspace / (log_file_env or ".seven/logs/seven.log")).resolve()

@@ -37,14 +37,15 @@ seven serve --host 127.0.0.1 --port 8000
 # open http://127.0.0.1:8000
 ```
 
-Agents work in `./workspace` (override with `SEVEN_WORKSPACE`), and all of
-seven's data lives there, in `.seven/`. The UI talks to the API at `/api/…`;
-the same API is how anything else controls seven — see
+Agents work in the current directory (override with `SEVEN_WORKSPACE`), and
+all of seven's data lives there, in `.seven/`. The UI talks to the API at
+`/api/…`; the same API is how anything else controls seven — see
 [docs/api.md](docs/api.md). `seven agents`, `seven send a1 "hi"`,
 `seven tools` and `seven logs -f` read the state database or the log directly
 and work while a server is running.
 
-With Docker: `docker compose up` serves on port 8000.
+With Docker: `docker compose up` serves on port 8000, with agents working in
+`/workspace` (mounted from `./workspace`).
 
 ## How it works
 
