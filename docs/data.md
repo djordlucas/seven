@@ -11,16 +11,16 @@ workspace; seven's database is not open to them.
 | Path | Holds | Written by |
 |------|-------|------------|
 | `.seven/seven.db` | Seven's state (below) | Seven |
-| `.seven/tools/<name>/r<revision>.ts` | Each generated tool revision's source, the file the runner imports | Seven, from the `tools` table |
-| `.seven/node_modules`, `.seven/package.json` | npm packages runs import | The runner's installs |
+| `.seven/tools/<name>/r<revision>.py` | Each generated tool revision's source, the file the runner imports | Seven, from the `tools` table |
+| `.seven/site-packages` | pip packages runs import | The runner's installs |
 | `.seven/logs/seven.log`, `seven.log.1` | The structured log (`logging.md`) | Seven |
-| `.seven/tmp/` | Temporary files for `run_js` and trial runs, deleted after the run | The runner |
+| `.seven/tmp/` | Temporary files for `run_python` and trial runs, deleted after the run | The runner |
 | anything else | The agents' files and databases | Agents and tools |
 
 ## State database
 
 `seven.db` uses WAL mode, so `seven agents` and `seven send` read and write it
-while another process runs agents.
+while the server process runs agents.
 
 | Table | One row per |
 |-------|-------------|
@@ -33,26 +33,21 @@ while another process runs agents.
 | `lease` | The process running agents, and its last heartbeat |
 | `meta` | Schema version and the counters behind agent and run ids |
 
-The schema is at version 2. A database is created at version 1 and brought up
-to date by migrations, in order, in one transaction when seven opens it; one
-from a newer seven is refused.
-
 ## Agent and tool databases
 
 | From | Use |
 |------|-----|
-| An agent | The `sql` built-in: `db` (a path relative to the workspace), `query`, and `params` (an array, for `?`) or `named` (an object, for `:name`). A query that returns rows gives up to 200 of them as JSON; any other statement gives `changes` and `lastInsertRowid`; several statements without parameters are run together. |
-| A run (a tool, `run_js`) | `seven.db(path)` returns a `node:sqlite` `DatabaseSync` on that file, created with its directories if needed. |
+| An agent | The `sql` built-in: `db` (a path relative to the workspace), `query`, and `params` (a list, for `?`) or `named` (an object, for `:name`). A query that returns rows gives up to 200 of them as JSON; any other statement gives `changes` and `lastInsertRowid`; several statements without parameters are run together. |
+| A run (a tool, `run_python`) | `seven.db(path)` returns a `sqlite3.Connection` on that file, created with its directories if needed. |
 
 Both resolve the path against the workspace, create the file if it is missing,
 and refuse a path outside the workspace or naming `.seven/seven.db`. A run can
-still open any file through `node:sqlite` directly; the refusal is a guard
-against mistakes, not a permission.
+still open any file through `sqlite3` directly; the refusal is a guard against
+mistakes, not a permission.
 
 ## Limits
 
 | Limit | Detail |
 |-------|--------|
-| No downgrade | Migrations only go forward; an older seven refuses a database a newer one migrated. |
-| No pruning of conversations or inboxes | `messages` and `inbox` grow for as long as an agent lives, compacted messages included; `/reset` clears only the root agent's conversation and summary. |
+| No pruning of conversations or inboxes | `messages` and `inbox` grow for as long as an agent lives, compacted messages included; `DELETE /api/agents/{id}/conversation` clears one agent's conversation and summary. |
 | `sql` opens a connection per call | No connection is kept between calls; a transaction cannot span calls. |

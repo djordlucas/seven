@@ -11,7 +11,7 @@ Open an issue with:
 - Steps to reproduce
 - Expected vs actual behavior
 - Your `.env` settings, without the API key (if relevant)
-- Logs or error output
+- Logs or error output (`seven logs --json`)
 
 ## Have a Feature Request?
 

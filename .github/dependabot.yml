@@ -1,13 +1,13 @@
 version: 2
 updates:
-  - package-ecosystem: "npm"
+  - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "daily"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
-      - "javascript"
+      - "python"
     reviewers:
       - "djordlucas"
     commit-message:
@@ -26,4 +26,3 @@ updates:
       - "djordlucas"
     commit-message:
       prefix: "deps"
-      include: "scope"

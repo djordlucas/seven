@@ -1,6 +1,7 @@
 .git
-node_modules
-.seven
-workspace
+.venv
 .env
-*.log
+workspace
+__pycache__
+*.pyc
+.pytest_cache

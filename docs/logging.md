@@ -3,35 +3,28 @@
 Every component of seven writes structured log lines, one JSON object per line,
 to `<workspace>/.seven/logs/seven.log`. Each line carries the context it
 belongs to — the agent, the turn, the step, the tool call, the run — so one
-agent's turn, or one run, can be followed from start to finish. `seven logs`
-filters and prints the file; `seven serve` also writes the lines to stderr, so
-`docker logs` shows them.
+agent's turn, or one run, can be followed from start to finish. The API reads
+them at `GET /api/logs`; `seven logs` filters and prints the file; `seven serve`
+also writes the lines to stderr, so `docker logs` shows them.
 
 ```bash
 seven logs                          # last 100 lines, readable
 seven logs --agent a2 -f            # one agent, following new lines
-seven logs --turn 3f2a1b9c          # one turn of one agent
 seven logs --level warn --tail 0    # every warning and error in the file
-seven logs --run r3 --json          # one background run, as raw JSON lines
+curl "localhost:8000/api/logs?grep=turn&tail=50"
 ```
 
 ## Line format
 
 ```json
-{"t":"2026-10-21T14:05:09.123Z","level":"info","msg":"tool called","pid":4242,"agent":"a1","turn":"3f2a1b9c","step":2,"call":"k1","tool":"run_js","kind":"builtin","ok":true,"duration_ms":105,"result_chars":19}
-```
-
-`seven logs` prints the same line as:
-
-```text
-14:05:09.123  INFO   a1 #3f2a1b9c s2  tool called  pid=4242 call=k1 tool=run_js kind=builtin ok=true duration_ms=105 result_chars=19
+{"t":"2026-10-21T14:05:09.123Z","level":"info","msg":"tool called","pid":4242,"agent":"a1","turn":"3f2a1b9c","step":2,"call":"k1","tool":"run_python","kind":"builtin","ok":true,"duration_ms":105,"result_chars":19}
 ```
 
 | Field | On | Meaning |
 |-------|----|---------|
 | `t`, `level`, `msg` | Every line | Time (ISO 8601, UTC), level, what happened |
 | `pid` | Every line | The seven process; changes across restarts |
-| `component` | Lines not about one agent's turn | `supervisor`, `runs` (background runs) or `runner` |
+| `component` | Lines not about one agent's turn | `supervisor`, `runs` (background runs), `runner` or `host` |
 | `agent` | Everything an agent does | Agent id: `seven`, `a1`, … |
 | `turn` | Everything in one turn | 8-character id, new for every turn |
 | `step` | Everything in one step | 1-based step number within the turn |
@@ -40,7 +33,7 @@ seven logs --run r3 --json          # one background run, as raw JSON lines
 | `run` | Background runs | The run id the agent sees: `r1`, `r2`, … |
 | `tool`, `revision`, `mode` | Runs of a generated tool | Its name, revision, and `sync`, `async` or `trial` |
 | `duration_ms` | Anything timed | Wall-clock duration |
-| `error`, `error_stack` | Failures | Message, and the stack when there is one |
+| `error`, `error_stack` | Failures | Message, and the exception when there is one |
 
 ## Levels
 
@@ -54,18 +47,17 @@ seven logs --run r3 --json          # one background run, as raw JSON lines
 The default level is `info`. Content appears at `debug` only. The API key is
 never logged at any level.
 
-## Messages
+## Reading the log
 
-| Component | `msg` |
-|-----------|-------|
-| Process | `seven started` (command, model, workspace, limits), `seven stopped`, `lease held by another process`, `uncaught exception`, `unhandled rejection` |
-| Supervisor | `supervisor started` (active agents), `supervisor stopping`, `agent spawned`, `spawn refused` (reason), `agent ended` (status, detail), `message sent`, `continuous agent's turn failed; retrying later`, `background runs lost in a restart`, `driving an agent failed` |
-| Agent loop | `turn started` (input: `user`, `task`, `message`, `wake` or `resume`), `turn finished` (outcome `answered` or `max_steps`, steps), `turn ended early` (`interrupted` or `error`), `message delivered`, `tool called` (tool, kind, ok, duration), `interrupted tool calls closed`, `context compacted` (reason `threshold`, `overflow` or `manual`; messages folded and kept; estimated tokens before and after; summary length), `context overflowed`, `context compaction failed`, `context not compacted` |
-| Model client | `model replied` (duration, attempt, finish reason, tool calls, prompt and completion tokens), `model call retried` (status, delay), `model call failed`, `model call queued` (debug: time waiting for the concurrency limit), `model request`, `model reply content`, `model call aborted` (debug) |
-| Runner | `run started` (file, pid, limits), `run finished` (outcome `ok`, `error`, `killed`, `timeout` or `exited`; output lines; the exit code and signal for `exited`), `run kill requested`, `run could not start`, `run not started` (install or syntax error), `run cancelled before it started`, `host call`, `packages installed`, `package install failed` |
-| Background runs | `background run started`, `background run finished`, `killing background runs at shutdown` |
-| Tools | `tool saved`, `tool not saved: trial run failed`, `tool deleted`, `tool disabled`, `tool enabled` |
-| Agent built-ins | `waited for a message`, `sql`, `sql failed` |
+| Where | Shows |
+|-------|-------|
+| `seven logs --agent <id>` / `--turn <id>` / `--run <id>` | Lines of one agent / turn / run (a background run id or a `run_id`) |
+| `seven logs --level <level>` | Lines at that level or above |
+| `seven logs --grep <text>` | Lines containing the text, case-insensitive |
+| `seven logs --tail <n>` | The last `n` matching lines (default 100; `0` for all) |
+| `seven logs -f` | Then keeps printing new matching lines until interrupted |
+| `seven logs --json` | Raw JSON lines instead of the readable form |
+| `GET /api/logs` | The same filters as query parameters |
 
 ## Configuration
 
@@ -77,20 +69,7 @@ never logged at any level.
 
 The file is appended to synchronously, so a crash loses no line already
 logged. At 50 MiB it is renamed to `seven.log.1`, replacing the previous one,
-and a new file is started; `seven logs` reads both.
-
-## `seven logs`
-
-| Option | Shows |
-|--------|-------|
-| `--agent <id>` | Lines of one agent |
-| `--turn <id>` | Lines of one turn |
-| `--run <id>` | Lines of one run: a background run id (`r3`) or a `run_id` |
-| `--level <level>` | Lines at that level or above |
-| `--grep <text>` | Lines containing the text, case-insensitive |
-| `--tail <n>` | The last `n` matching lines (default 100; `0` for all) |
-| `-f`, `--follow` | Then keeps printing new matching lines until interrupted |
-| `--json` | Raw JSON lines instead of the readable form |
+and a new file is started; both readers read both files.
 
 ## Limits
 

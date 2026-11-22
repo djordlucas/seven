@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seven"
+version = "0.1.0"
+description = "Seven: an LLM agent that builds itself, as a FastAPI app with a companion UI"
+readme = "README.md"
+license = { text = "GPL-3.0-only" }
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "httpx>=0.27",
+]
+
+[project.scripts]
+seven = "seven.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["seven*"]
+
+[tool.setuptools.package-data]
+"seven" = ["ui/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 140
+
+[tool.ruff.lint]
+ignore = ["E501", "BLE001", "S110", "TRY203", "G010"]
