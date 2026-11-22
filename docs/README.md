@@ -1,19 +1,22 @@
-# Documentation
+# Docs
 
-`docs/` describes how seven works today, for people running or changing it. The
-design history is in `adr/`; the normative contracts are in `spec/`.
+`docs/` is the source of truth for how seven behaves; a code/doc mismatch is a
+bug in one of them, to be reconciled. Every file follows
+[DOCS_STYLE.md](../DOCS_STYLE.md).
 
-| Document | Subject |
-|----------|---------|
-| `architecture.md` | Components, the agent loop, built-in and generated tools, configuration |
-| `compaction.md` | Context compaction: when an agent's conversation is summarized, what is kept, failures |
-| `multi-agent.md` | Agents: modes, status, spawning, messaging, the CLI commands that run them, restarts |
-| `logging.md` | The structured log: format, fields, levels, messages, `seven logs` |
-| `data.md` | Where data lives: the state database, and the databases agents and tools use |
-| `runner.md` | The runner: runs, limits, host functions, dependencies |
-| `docker.md` | Images, volumes and Make targets for running and developing seven |
-| `glossary.md` | The terms these documents use |
+| Doc | Subject |
+|-----|---------|
+| [architecture.md](architecture.md) | The process, the agent loop, built-in tools, configuration |
+| [api.md](api.md) | The HTTP API that controls seven, and the SSE event stream |
+| [ui.md](ui.md) | The companion web UI served at `/` |
+| [agents.md](agents.md) | Multi-agent: modes, inboxes, restarts, the lease, the CLI |
+| [runner.md](runner.md) | The Python child process every piece of model-written code runs in |
+| [data.md](data.md) | Where everything lives: the workspace layout and the state database |
+| [logging.md](logging.md) | The structured JSON-lines log and how to read it |
+| [compaction.md](compaction.md) | Folding long conversations into a summary |
 
 ## Limits
 
-No document covers deployment beyond a local Docker host; there is none.
+| Limit | Detail |
+|-------|--------|
+| No contracts directory | The old `spec/` contracts were dropped in the Python reset; `docs/` is normative. |

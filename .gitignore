@@ -1,14 +1,12 @@
-node_modules/
-
-# seven's own data when run from the repo: the state database, tool sources
-# and node_modules (<workspace>/.seven).
-/.seven/
-
-# The dev container's workspace (compose.yaml mounts it at /workspace).
-/workspace/
-
-# Environment files
+__pycache__/
+*.py[cod]
+.venv/
+.eggs/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
 .env
-
-*.log
-/tmp
+workspace/
+.seven/

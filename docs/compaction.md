@@ -12,7 +12,7 @@ compacted the same way, so a continuous agent can run indefinitely.
 |---------|-----------|------|
 | Threshold | Before a step, the estimated request is above 75% of `SEVEN_CONTEXT_TOKENS` | Compact, then call the model |
 | Overflow | The model rejects a request as too long (a 400, 413 or 422 that names tokens, context or length) | Compact, then make the call once more; a second rejection fails the turn |
-| Manual | `/compact` in the interactive session (the root agent) | Compact now |
+| Manual | `POST /api/agents/{id}/compact` | Compact now |
 
 The estimate is the request's size in characters — system prompt, conversation
 and tool schemas — divided by characters per token. That ratio starts at a
@@ -63,4 +63,3 @@ messages are summarized; it is not stored.
 | One giant step cannot be compacted | A turn's latest step is always kept whole; tool results are capped at 16,000 characters, but 40 of them in one turn can still exceed a small window. |
 | The estimate is approximate | Until the first reply reports usage, and after a restart, the ratio is the default 3 characters per token. |
 | Overflow is recognised by its wording | A provider error that does not mention tokens, context or length is not treated as an overflow. |
-| `/compact` is root-only | Other agents compact only at the threshold or on overflow. |

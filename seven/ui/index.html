@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>seven</title>
+<link rel="stylesheet" href="/ui/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>7</text></svg>">
+</head>
+<body>
+<header>
+  <div class="brand">seven<span class="brand-sub">agent control</span></div>
+  <nav>
+    <button data-view="agents" class="nav-btn active">Agents</button>
+    <button data-view="tools" class="nav-btn">Tools</button>
+    <button data-view="runs" class="nav-btn">Runs</button>
+    <button data-view="logs" class="nav-btn">Logs</button>
+    <button data-view="config" class="nav-btn">Config</button>
+  </nav>
+  <div id="health" class="health"></div>
+</header>
+<main>
+  <section id="view-agents" class="view active">
+    <div class="agents-layout">
+      <div class="agents-side">
+        <div class="panel-head">
+          <h2>Agents</h2>
+          <button id="btn-spawn" class="btn primary">+ New agent</button>
+        </div>
+        <table class="list" id="agents-table"></table>
+      </div>
+      <div class="chat-pane" id="chat-pane">
+        <div class="panel-head">
+          <h2 id="chat-title">No agent selected</h2>
+          <div class="actions" id="chat-actions"></div>
+        </div>
+        <div id="chat-status" class="status-line"></div>
+        <div id="messages" class="messages"></div>
+        <form id="send-form" class="send-form hidden">
+          <textarea id="send-input" rows="2" placeholder="Message this agent… (Enter to send, Shift+Enter for newline)"></textarea>
+          <button class="btn primary" type="submit">Send</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-tools" class="view">
+    <div class="panel-head">
+      <h2>Generated tools</h2>
+      <div>
+        <button id="btn-exec" class="btn">Run Python</button>
+        <button id="btn-define" class="btn primary">+ Define tool</button>
+      </div>
+    </div>
+    <table class="list" id="tools-table"></table>
+    <div id="tool-detail" class="detail hidden"></div>
+  </section>
+
+  <section id="view-runs" class="view">
+    <div class="panel-head"><h2>Background runs</h2><button id="btn-refresh-runs" class="btn">Refresh</button></div>
+    <table class="list" id="runs-table"></table>
+    <div id="run-detail" class="detail hidden"></div>
+  </section>
+
+  <section id="view-logs" class="view">
+    <div class="panel-head">
+      <h2>Logs</h2>
+      <div class="log-filters">
+        <input id="log-agent" placeholder="agent" size="8">
+        <select id="log-level"><option value="">any level</option><option>debug</option><option>info</option><option>warn</option><option>error</option></select>
+        <input id="log-grep" placeholder="grep" size="12">
+        <input id="log-tail" type="number" value="200" size="6" title="tail">
+        <label><input type="checkbox" id="log-follow"> follow</label>
+        <button id="btn-logs" class="btn">Apply</button>
+      </div>
+    </div>
+    <div id="logs-table" class="logs"></div>
+  </section>
+
+  <section id="view-config" class="view">
+    <div class="panel-head"><h2>Config & health</h2></div>
+    <table class="list" id="config-table"></table>
+  </section>
+</main>
+
+<div id="modal-backdrop" class="modal-backdrop hidden">
+  <div class="modal">
+    <div class="panel-head"><h3 id="modal-title"></h3><button id="modal-close" class="btn">✕</button></div>
+    <div id="modal-body"></div>
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="/ui/app.js"></script>
+</body>
+</html>

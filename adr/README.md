@@ -1,39 +1,15 @@
-# ADR — decision records and implementation notes
+# ADRs
 
-This directory holds the **record of how seven got here**: design notes,
-investigation reports, implementation plans and reviews, for people changing
-seven. It does not describe current behavior; `docs/` does.
+`adr/` records decisions: why seven is the way it is. `docs/` describes the
+present; an ADR is the record of how it got there and stays put after the
+decision ships. New ADRs are numbered (`0001-…`, `0002-…`).
 
-## What goes where
-
-| | `docs/` | `adr/` |
-|---|---|---|
-| Answers | how seven works today | why it works that way |
-| Audience | users and operators | people changing seven |
-| Tense | present | historical |
-| Code references | avoided — components and concepts instead | expected: file paths, symbols, commits |
-
-A document belongs here if its value is the *record* — the options weighed, the
-migration sequence, the problem that motivated a change. When a plan here ships,
-its behavior is absorbed into `docs/` and the plan stays as the record.
-
-## Contents
-
-### Implemented
-
-| Document | What it records | Shipped |
-|----------|-----------------|---------|
-| `compaction.md` | Summarizing an agent's older messages to fit the context window; schema migrations | 2026-10-22 |
-| `multi-agent.md` | Many concurrent agents with inboxes, SQLite state in the workspace, agent databases | 2026-10-21 |
-| `child-process-runner.md` | Replacing the QuickJS-in-wasm VM with a Node.js child process per run; the npm compatibility probe that decided it | 2026-10-21 |
-
-### Superseded
-
-| Document | What it records | Superseded by |
-|----------|-----------------|---------------|
-| `vm-runtime.md` | The QuickJS-in-wasm VM as a simpler equivalent of nine's tool VM: what was kept, what was dropped and why | `child-process-runner.md` |
+| ADR | Decision |
+|-----|----------|
+| [0001-python-fastapi-reset.md](0001-python-fastapi-reset.md) | Reset the codebase from Node.js/TypeScript to Python/FastAPI: seven is one FastAPI process with an API and a companion UI |
 
 ## Limits
 
-ADRs are exempt from `DOCS_STYLE.md` rule 6: they keep superseded content by
-design, in past tense, and are not rewritten when a decision is later reversed.
+| Limit | Detail |
+|-------|--------|
+| No retroactive edits | An ADR is not updated after it ships; a reversal is a new ADR. |
