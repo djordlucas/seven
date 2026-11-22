@@ -19,6 +19,7 @@ child-process runner, SQLite state in `.seven/seven.db`, REST + SSE + UI.
 | R2 | **Every message peer — the supervisor and every agent (root or sub) — has a persisted inbox and outbox**, so agent-to-agent and agent-to-supervisor communication is first-class: sending records both sides, and either side can read what it received and what it sent. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
 | R3 | **Efficient use of context**: (a) long tool output is spilled to memory and read back by chunks instead of entering the conversation whole; (b) the full tool-schema set is not sent every step — tools are exposed through discovery or skills; (c) work is delegated to sub-agents when possible, so only their final answer enters the parent's context. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
 | R4 | **Skills are a first-class concept** (refining R3b): a skill lists tools (plus description and instructions); **a tool used in a skill cannot be deleted — the skill must be changed first**; skills get **full CRUD from both the user (API/UI) and the model (built-ins)**. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
+| R5 | **An eval suite confirms that all features work end to end** — not just unit-level, but whole flows across layers (agent turns, jobs, mail, memory, discovery, skills, delegation, runner, API/UI), deterministically and without network or an API key. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
 
 ## State & migration (v2)
 
@@ -95,6 +96,24 @@ instructions**.
 | Prompt | The system prompt lists skills by name + description (small) and appends the instructions of loaded skills; skill tools' schemas are sent only while loaded. |
 | Events | `skill_defined`, `skill_deleted`, `skill_loaded`, `skill_unloaded` join the SSE stream. |
 
+## Proposed design for R5 (eval suite)
+
+An `evals/` directory next to `tests/`, run by `make eval` (and included in
+`make ci`): each eval is a small scripted scenario — a fresh temp workspace, a
+SevenApp with the **scripted model** from `tests/fake_model.py` (deterministic
+replies, no network, no API key), actions (API calls, built-in calls, CLI
+commands, simulated restarts), and assertions on API responses, DB rows and
+emitted events. A run prints one line per eval (pass/fail, duration) and exits
+non-zero on any failure; failed evals keep their workspace for inspection.
+
+| Coverage | Evals |
+|----------|-------|
+| Base loop | agent turn with tool calls; `run_python` sync/async; background runs + kill; restart resume (`repair`); API happy paths; SSE events |
+| R1 | `task` job done + mailed to creator; `goal` job loop with scripted YES/NO checks → done, and `max_turns` → failed; `periodic` wake honoring `next_run_at`; job restart resume; supervisor command via a message to `supervisor`; assignment-scope refusal (agent → other agent) |
+| R2 | send → inbox + outbox rows in one tx; `list_inbox`/`list_outbox`; delivered flag propagation; supervisor peer send/receive; unknown command answered with an error message |
+| R3 | result over `SEVEN_SPILL_CHARS` spills to `.seven/memory/` and the `tool` message carries the reference; `read_memory` chunk round-trip; `describe_tool` persists into `revealed_tools`; `SEVEN_TOOL_DISCOVERY=0` restores full schemas; `delegate` returns only the final answer, stops the sub-agent, times out → `error:` |
+| R4 | `define_skill` validation (unknown tool refused); full CRUD via built-ins and `/api/skills`; `delete_tool` refused while a skill uses it, allowed after the skill changes; `load_skill`/`unload_skill` persisted per agent and reflected in the next request's tool list |
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -122,16 +141,19 @@ instructions**.
 - `api.py` + `seven/ui/`: `/api/jobs`, `/api/skills` (full CRUD), `/api/memory/{id}`,
   outbox and supervisor-peer endpoints, Jobs/Skills views, agent-pane mail
   tabs and memory reader, load/unload per agent, tool discovery surfaces.
+- `evals/` + a runner (`python -m seven.evals` or `make eval`) with the
+  coverage table above; `make ci` runs pytest + ruff + evals.
 - `docs/` (architecture, agents, api, ui, data, runner) and `prompt.py`
   updated in the same change.
 
 ## Verification
 
-- Tests per requirement, no network: job lifecycle incl. restart resume and
-  goal check; mail round-trip (inbox + outbox, supervisor commands); spill +
-  `read_memory` round-trip; discovery reveal persistence; skills CRUD and the
-  delete-protection refusal; `delegate` success and timeout.
-- Gate: `make ci` (pytest + ruff). Docs updated in the same change.
+- Unit tests per requirement, no network: job lifecycle incl. restart resume
+  and goal check; mail round-trip (inbox + outbox, supervisor commands);
+  spill + `read_memory` round-trip; discovery reveal persistence; skills CRUD
+  and the delete-protection refusal; `delegate` success and timeout.
+- Eval suite (R5) confirms whole features end to end against a scripted model.
+- Gate: `make ci` (pytest + ruff + evals). Docs updated in the same change.
 
 ## Limits
 
@@ -139,7 +161,7 @@ instructions**.
 |-------|--------|
 | One runner per workspace | Jobs and supervisor-inbox processing only progress in the lease-holding process; elsewhere they stay persisted. |
 | The root is never a job target | Jobs drive sub-agents or spawned workers; the root stays user-driven. |
-| Job assignment scope | Sub-agents can start/stop jobs on themselves only; jobs on other agents come from the supervisor (supervisor messages, API/UI). |
+| Job assignment scope | Sub-agents can start/stop jobs on themselves only; jobs on other agents come from the supervisor (supervisor messages, API/UI). (`delegate` in R3c is different: it spawns a throwaway request agent for one task and stops it — it does not assign a job.) |
 | Goal judgement is model-based | The YES/NO check is another model call, with its own cost and fallibility. |
 | One active job per agent | An agent runs one turn at a time; a second job on the same agent queues behind the first. |
 | Mail is FIFO text-only | No priorities, no attachments; delivery is one `delivered_at` flag, no read receipts. |
@@ -148,4 +170,5 @@ instructions**.
 | Loaded skills and revealed tools are per agent | Persisted per agent; changes affect only that agent's next steps. |
 | Spilled output costs a read | The agent pays one `read_memory` call per chunk it actually needs. |
 | Delegation hides the sub-agent's work | The parent sees only the final answer; the full transcript stays in the sub-agent's row for the UI/logs. |
+| Evals are scripted, not a quality measure | The eval suite proves features work with a deterministic model; it says nothing about real-model behavior. |
 | Placeholder designs | Nothing here is implemented yet; the ADR records intent until accepted. |
