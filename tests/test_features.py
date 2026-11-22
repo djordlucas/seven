@@ -3,9 +3,9 @@ from conftest import until
 from fake_model import reply, tc
 
 from seven.agent import Agent, AgentDeps
-from seven.builtins import builtins
-from seven.builtins.shared import BuiltinContext
-from seven.state import ROOT_ID
+from seven.core.state import ROOT_ID
+from seven.tools.builtins import builtins
+from seven.tools.builtins.shared import BuiltinContext
 
 
 def make_ctx(env, agent_id="seven") -> BuiltinContext:
@@ -119,7 +119,7 @@ async def test_job_persists_across_restart(started_env):
     job = env.sup.start_job("user", "periodic", {"interval_s": 60, "instructions": "tick"}, agent=None)
     await env.sup.shutdown()
     env.sup2 = type(env.sup)(type(env.sup).opts if hasattr(env.sup, "opts") else None) if False else None
-    from seven.supervisor import Supervisor, SupervisorOpts
+    from seven.agent import Supervisor, SupervisorOpts
     sup2 = Supervisor(SupervisorOpts(state=env.state, store=env.store, runner=env.runner, model=env.model,
                                      workspace=str(env.cfg.workspace), max_steps=10, context_tokens=128_000,
                                      max_agents=4, log=env.log))

@@ -8,8 +8,8 @@ import json
 import math
 import re
 
-from .llm import ChatModel, Message
-from .log import Logger, noop_logger
+from ..core.llm import ChatModel, Message
+from ..core.log import Logger, noop_logger
 
 COMPACT_AT = 0.75
 KEEP = 0.25

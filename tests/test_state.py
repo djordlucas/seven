@@ -1,6 +1,6 @@
 import time
 
-from seven.state import ROOT_ID, State
+from seven.core.state import ROOT_ID, State
 
 
 def test_root_agent_created(tmp_path):

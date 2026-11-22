@@ -28,11 +28,25 @@ persisted autonomous jobs.
                      all data in the workspace (SEVEN_WORKSPACE)
 ```
 
+## Package layout
+
+```text
+seven/
+  __init__.py     version
+  __main__.py     CLI: serve runs the server; agents/send/tools/logs read state
+  app.py          composition root: wires the packages below into SevenApp
+  core/           config.py · log.py · state.py (SQLite) · llm.py (Mistral client)
+  execution/      runner.py · child.py (python -m seven.execution.child) · runs.py
+  tools/          store.py (generated tools) · builtins/ (the built-in tools)
+  agent/          agent.py (the loop) · supervisor.py · prompt.py · compact.py
+  api/            app.py (FastAPI: /api/…, /api/events) · ui/ (the web UI at /)
+```
+
 ## Components
 
 | Component | Responsibility |
 |-----------|----------------|
-| API | FastAPI app (`seven/api.py`): REST under `/api/…`, SSE at `/api/events`, the UI at `/`. Every route is `async def` so it shares the event loop with the agents. |
+| API | FastAPI app (`seven/api/app.py`): REST under `/api/…`, SSE at `/api/events`, the UI at `/`. Every route is `async def` so it shares the event loop with the agents. |
 | CLI | `seven serve` wires everything and holds the lease; `seven agents`, `seven send`, `seven tools` and `seven logs` read the state database or the log without running agents, so they work while a server runs. |
 | Supervisor | Runs every agent's loop concurrently: resumes unfinished agents at start, starts a turn for each idle agent with work in its inbox (polled every 250 ms), ends request and sequence agents when their tasks are done, and tells parents when children end (`agents.md`). It also drives persisted jobs (task, goal, periodic) on their agents. The root agent is driven by the user, through the API. The supervisor itself is a peer (`supervisor`) with its own inbox, outbox and command language. |
 | Agent loop | One per agent. Sends the agent's conversation and the current tool list to the model, runs every tool call in the reply, appends the results, and repeats until a reply has no tool calls or the step budget runs out. Every message is written to the state database as it is produced, and results over `SEVEN_SPILL_CHARS` are spilled to memory instead. Compacts the conversation into a summary when it nears the context window (`compaction.md`). |

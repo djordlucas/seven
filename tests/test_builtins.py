@@ -1,8 +1,8 @@
 import json
 
-from seven.builtins.shared import BuiltinContext, disabled_error, format_run
-from seven.builtins.sql import resolve_db, sql_builtins
-from seven.runner import RunResult
+from seven.execution.runner import RunResult
+from seven.tools.builtins.shared import BuiltinContext, disabled_error, format_run
+from seven.tools.builtins.sql import resolve_db, sql_builtins
 
 
 def make_ctx(env, agent_id="seven") -> BuiltinContext:
@@ -55,7 +55,7 @@ async def test_disable_tool_refuses_calls(started_env):
     env = started_env
     env.store.save(name="t1", description="d", parameters={}, deps={}, packages=[], source="default = 1")
     ctx = make_ctx(env)
-    from seven.builtins import builtins
+    from seven.tools.builtins import builtins
     assert await builtins()["disable_tool"].run({"name": "t1", "reason": "misbehaving"}, ctx) == "disabled t1"
     assert "disabled (misbehaving)" in disabled_error(env.store.get("t1"))
     assert await builtins()["enable_tool"].run({"name": "t1"}, ctx) == "enabled t1"

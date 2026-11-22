@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 
-from seven.compact import SUMMARIZER_PROMPT
-from seven.llm import Completion
-from seven.log import noop_logger
+from seven.agent.compact import SUMMARIZER_PROMPT
+from seven.core.llm import Completion
+from seven.core.log import noop_logger
 
 
 def tc(name: str, args: dict | None = None, call_id: str | None = None) -> dict:

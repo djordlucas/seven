@@ -1,4 +1,4 @@
-from seven.config import load_config
+from seven.core.config import load_config
 
 
 def test_defaults(tmp_path, monkeypatch):

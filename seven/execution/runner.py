@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .log import Logger, noop_logger, preview
+from ..core.log import Logger, noop_logger, preview
 
 MAX_LOG_CHARS = 1_000_000
 RPC_FD = 3
@@ -205,7 +205,7 @@ class Runner:
             env = dict(os.environ)
             env["PYTHONPATH"] = os.pathsep.join([str(Path(__file__).resolve().parent.parent), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-u", "-m", "seven._child",
+                sys.executable, "-u", "-m", "seven.execution.child",
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd, env=env, start_new_session=True, pass_fds=(rpc_w,),
             )

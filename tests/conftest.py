@@ -6,12 +6,12 @@ from types import SimpleNamespace
 import pytest
 from fake_model import ScriptedModel
 
-from seven.config import load_config
-from seven.log import Logger
-from seven.runner import Runner
-from seven.runs import RunTable
-from seven.state import State
-from seven.supervisor import Supervisor, SupervisorOpts
+from seven.agent import Supervisor, SupervisorOpts
+from seven.core.config import load_config
+from seven.core.log import Logger
+from seven.core.state import State
+from seven.execution.runner import Runner
+from seven.execution.runs import RunTable
 from seven.tools import ToolStore
 
 

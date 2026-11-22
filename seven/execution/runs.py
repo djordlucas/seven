@@ -13,9 +13,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .log import Logger, noop_logger
+from ..core.log import Logger, noop_logger
+from ..core.state import State
 from .runner import RunHandle
-from .state import State
 
 KEEP_LOG_LINES = 500
 

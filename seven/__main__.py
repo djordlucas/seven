@@ -8,9 +8,9 @@ import json
 import sys
 import time
 
-from .config import load_config
-from .log import format_readable, read_log
-from .state import TERMINAL, State
+from .core.config import load_config
+from .core.log import format_readable, read_log
+from .core.state import TERMINAL, State
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -29,7 +29,7 @@ seven = "seven.__main__:main"
 include = ["seven*"]
 
 [tool.setuptools.package-data]
-"seven" = ["ui/*"]
+"seven.api" = ["ui/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

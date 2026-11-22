@@ -7,7 +7,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from ..tools import TOOL_NAME
+from ..store import TOOL_NAME
 from .shared import (
     DEPS_SCHEMA,
     Builtin,
@@ -146,7 +146,7 @@ async def _read_tool(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _delete_tool(a: dict, ctx: BuiltinContext) -> str:
-    from ..tools import ToolInUseError
+    from ..store import ToolInUseError
     name = str(a.get("name", ""))
     try:
         removed = ctx.store.remove(name)

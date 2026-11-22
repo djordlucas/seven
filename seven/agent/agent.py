@@ -10,8 +10,13 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from .builtins import builtins
-from .builtins.shared import await_run, disabled_error, format_run, start_generated
+from ..core.llm import ChatModel, Completion, ToolDef
+from ..core.log import Logger, noop_logger, preview
+from ..core.state import State, now_iso
+from ..execution.runner import Runner
+from ..execution.runs import RunTable, summarize
+from ..tools.builtins import builtins
+from ..tools.builtins.shared import await_run, disabled_error, format_run, start_generated
 from .compact import (
     COMPACT_AT,
     KEEP,
@@ -21,12 +26,7 @@ from .compact import (
     request_chars,
     summarize_conversation,
 )
-from .llm import ChatModel, Completion, ToolDef
-from .log import Logger, noop_logger, preview
 from .prompt import system_prompt
-from .runner import Runner
-from .runs import RunTable, summarize
-from .state import State, now_iso
 
 MAX_RESULT_CHARS = 16_000
 
@@ -247,7 +247,7 @@ class Agent:
         bl = builtins()
         row = self.row()
         if self.deps.tool_discovery:
-            from .builtins.discovery import META_TOOLS
+            from ..tools.builtins.discovery import META_TOOLS
             names = set(self.deps.core_tools) | set(META_TOOLS) | set(row["revealed_tools"])
             for s in row["loaded_skills"]:
                 sk = state.get_skill(s)
@@ -302,7 +302,7 @@ class Agent:
         return result
 
     def builtin_context(self, log: Logger):
-        from .builtins.shared import BuiltinContext
+        from ..tools.builtins.shared import BuiltinContext
         return BuiltinContext(agent_id=self.id, runner=self.deps.runner, store=self.deps.store, runs=self.deps.runs,
                               supervisor=self.deps.supervisor, workspace=self.deps.workspace,
                               state_db=self.deps.state.path, abort=self.abort, log=log)
