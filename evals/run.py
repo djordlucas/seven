@@ -4,7 +4,7 @@ Each eval builds a fresh workspace and a real SevenApp stack with a scripted
 model, performs whole flows (API, built-ins, jobs, mail, memory, skills,
 delegate, restart), and asserts on DB rows / API responses / events.
 
-Run: python evals/run.py   (or: make eval). Exit code is non-zero if any eval
+Run: python -m evals.run   (or: make eval). Exit code is non-zero if any eval
 fails; failed evals keep their workspace under the printed path.
 """
 
@@ -17,13 +17,10 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
-
-from fake_model import ScriptedModel, reply, tc
-
 from seven.app import SevenApp
 from seven.core.config import load_config
 from seven.core.state import ROOT_ID
+from tests.fake_model import ScriptedModel, reply, tc
 
 
 async def until(pred, timeout=15.0, interval=0.05) -> bool:
@@ -138,7 +135,7 @@ async def eval_spill_memory_and_discovery(tmp: Path) -> None:
         from seven.tools.builtins import builtins
         from seven.tools.builtins.shared import BuiltinContext
         ctx = BuiltinContext(agent_id="seven", runner=app.runner, store=app.store, runs=app.supervisor.runs,
-                             supervisor=app.supervisor, workspace=str(app.config.workspace), state_db=app.state.path,
+                             supervisor=app.supervisor, state=app.state, workspace=str(app.config.workspace), state_db=app.state.path,
                              abort=None, log=app.log.child(agent="seven"))
         chunk = await builtins()["read_memory"].run({"id": oid, "offset": 8995, "limit": 100}, ctx)
         assert "zzzzz" in chunk and "9000 chars total" in chunk
@@ -160,7 +157,7 @@ async def eval_skills_and_delegate(tmp: Path) -> None:
         from seven.tools.builtins import builtins
         from seven.tools.builtins.shared import BuiltinContext
         ctx = BuiltinContext(agent_id="seven", runner=app.runner, store=app.store, runs=app.supervisor.runs,
-                             supervisor=app.supervisor, workspace=str(app.config.workspace), state_db=app.state.path,
+                             supervisor=app.supervisor, state=app.state, workspace=str(app.config.workspace), state_db=app.state.path,
                              abort=None, log=app.log.child(agent="seven"))
         r = await app.runner.run_file(_write(tmp, "adder.py", "def default(a):\n    return a['x'] + 1"), {"x": 1})
         assert r.ok

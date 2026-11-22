@@ -30,11 +30,11 @@ def _fmt(item: dict, delivered: bool) -> str:
 
 async def _list_inbox(a: dict, ctx: BuiltinContext) -> str:
     limit = a.get("limit") if isinstance(a.get("limit"), int) and a["limit"] > 0 else 20
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     pending = state.pending(ctx.agent_id)
     lines = [f"pending ({len(pending)}):"]
     lines += [_fmt(p, False) for p in pending[:limit]]
-    all_rows = state._all("SELECT * FROM inbox WHERE agent = ? AND delivered_at IS NOT NULL ORDER BY id DESC LIMIT ?", (ctx.agent_id, limit))
+    all_rows = state.query("SELECT * FROM inbox WHERE agent = ? AND delivered_at IS NOT NULL ORDER BY id DESC LIMIT ?", (ctx.agent_id, limit))
     lines.append(f"recently delivered ({len(all_rows)} shown):")
     lines += [_fmt(dict(r), True) for r in all_rows]
     return "\n".join(lines)
@@ -42,7 +42,7 @@ async def _list_inbox(a: dict, ctx: BuiltinContext) -> str:
 
 async def _list_outbox(a: dict, ctx: BuiltinContext) -> str:
     limit = a.get("limit") if isinstance(a.get("limit"), int) and a["limit"] > 0 else 50
-    rows = ctx.supervisor.opts.state.list_outbox(ctx.agent_id, limit)
+    rows = ctx.state.list_outbox(ctx.agent_id, limit)
     if not rows:
         return "nothing sent yet"
     return "\n".join(f'- {"delivered" if r["delivered_at"] else "pending"} to {r["recipient"]} ({r["kind"]}): {r["text"][:200]}' for r in reversed(rows))

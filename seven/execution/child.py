@@ -7,6 +7,7 @@ stderr stay free for the run's own output, which the parent captures.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import inspect
 import json
@@ -18,12 +19,10 @@ from pathlib import Path
 
 
 def _set_memory_cap(memory_mb: int) -> None:
-    try:
-        import resource
+    import resource
+    with contextlib.suppress(OSError, ValueError, OverflowError):
         limit = memory_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-    except Exception:
-        pass
 
 
 class _Rpc:

@@ -4,18 +4,18 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from fake_model import ScriptedModel
 
 from seven.agent import Supervisor, SupervisorOpts
-from seven.core.config import load_config
+from seven.core.config import Config, load_config
 from seven.core.log import Logger
 from seven.core.state import State
 from seven.execution.runner import Runner
 from seven.execution.runs import RunTable
 from seven.tools import ToolStore
+from tests.fake_model import ScriptedModel
 
 
-def make_config(tmp_path, **overrides) -> object:
+def make_config(tmp_path, **overrides) -> Config:
     env = {
         "SEVEN_WORKSPACE": str(tmp_path),
         "SEVEN_LLM_API_KEY": "test-key",

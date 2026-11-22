@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import re
 import sqlite3
@@ -46,11 +47,9 @@ def resolve_db(workspace: str, state_db: str, p: str) -> str:
         return f'error: "{p}" is outside the workspace; databases live in the workspace'
     if str(rel) == ".":
         return f'error: "{p}" is outside the workspace; databases live in the workspace'
-    try:
+    with contextlib.suppress(OSError):
         if file.resolve() == Path(state_db).resolve():
             return f'error: "{p}" is seven\'s own database; use another file'
-    except OSError:
-        pass
     return str(file)
 
 

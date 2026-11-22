@@ -7,7 +7,7 @@ from seven.tools.builtins.sql import resolve_db, sql_builtins
 
 def make_ctx(env, agent_id="seven") -> BuiltinContext:
     return BuiltinContext(agent_id=agent_id, runner=env.runner, store=env.store, runs=env.runs,
-                          supervisor=env.sup, workspace=str(env.cfg.workspace), state_db=env.state.path,
+                          supervisor=env.sup, state=env.state, workspace=str(env.cfg.workspace), state_db=env.state.path,
                           abort=None, log=env.log.child(agent=agent_id))
 
 

@@ -42,6 +42,8 @@ class ChatModel(Protocol):
                        max_tokens: int | None = None, abort: asyncio.Event | None = None,
                        log: Logger = noop_logger) -> Completion: ...
 
+    async def close(self) -> None: ...
+
 
 @dataclass
 class Mistral:
@@ -51,6 +53,10 @@ class Mistral:
     max_attempts: int = 5
     concurrency: int = 4
     client: httpx.AsyncClient | None = field(default=None, repr=False)
+    _sem: asyncio.Semaphore = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._sem = asyncio.Semaphore(self.concurrency)
 
     def _http(self) -> httpx.AsyncClient:
         if self.client is None:
@@ -65,13 +71,11 @@ class Mistral:
     async def complete(self, *, messages: list[Message], tools: list[ToolDef] | None = None,
                        max_tokens: int | None = None, abort: asyncio.Event | None = None,
                        log: Logger = noop_logger) -> Completion:
-        sem = getattr(self, "_sem", None)
-        if sem is None:
-            sem = self._sem = asyncio.Semaphore(self.concurrency)
-        async with sem:
+        async with self._sem:
             return await self._complete_locked(messages=messages, tools=tools, max_tokens=max_tokens, abort=abort, log=log)
 
-    async def _complete_locked(self, *, messages, tools, max_tokens, abort, log) -> Completion:
+    async def _complete_locked(self, *, messages: list[Message], tools: list[ToolDef] | None,
+                               max_tokens: int | None, abort: asyncio.Event | None, log: Logger) -> Completion:
         if not self.api_key:
             raise RuntimeError("mistral: no API key; set SEVEN_LLM_API_KEY (or MISTRAL_API_KEY)")
         body = json.dumps({

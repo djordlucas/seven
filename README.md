@@ -69,7 +69,7 @@ With Docker: `docker compose up` serves on port 8000, with agents working in
 ```bash
 make install     # pip install -e ".[dev]"
 make test        # pytest (no network, no API key: the model is scripted)
-make eval        # evals/run.py: 8 end-to-end feature checks against a scripted model
+make eval        # python -m evals.run: 8 end-to-end feature checks against a scripted model
 make ci          # the gate before committing: ruff + pytest + evals
 make serve       # seven serve on 127.0.0.1:8000
 ```
@@ -85,7 +85,7 @@ against a scripted model; nothing has been tuned against real sessions yet.
 ## Roadmap
 
 - Eval tasks that require building tools, to measure what the agent builds
-  and reuses (the feature eval suite itself lives in `evals/run.py`,
+  and reuses (the feature eval suite itself lives in `evals/` (`python -m evals.run`),
   `make eval`).
 - Streaming model replies into the UI.
 

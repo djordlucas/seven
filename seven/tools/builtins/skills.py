@@ -63,7 +63,7 @@ def skill_builtins() -> list:
 
 
 async def _define_skill(a: dict, ctx: BuiltinContext) -> str:
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     name = str(a.get("name", ""))
     if not SKILL_NAME.match(name):
         return f"error: name must match {SKILL_NAME.pattern}"
@@ -79,7 +79,7 @@ async def _define_skill(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _read_skill(a: dict, ctx: BuiltinContext) -> str:
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     s = state.get_skill(str(a.get("name", "")))
     if not s:
         return f'error: no skill named "{a.get("name")}"'
@@ -88,7 +88,7 @@ async def _read_skill(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _list_skills(a: dict, ctx: BuiltinContext) -> str:
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     skills = state.list_skills()
     if not skills:
         return "no skills yet — define_skill to create one"
@@ -98,7 +98,7 @@ async def _list_skills(a: dict, ctx: BuiltinContext) -> str:
 
 async def _delete_skill(a: dict, ctx: BuiltinContext) -> str:
     name = str(a.get("name", ""))
-    if not ctx.supervisor.opts.state.delete_skill(name):
+    if not ctx.state.delete_skill(name):
         return f'error: no skill named "{name}"'
     ctx.log.info("skill deleted", skill=name)
     ctx.supervisor.emit({"type": "skill_deleted", "skill": name})
@@ -106,7 +106,7 @@ async def _delete_skill(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _load_skill(a: dict, ctx: BuiltinContext) -> str:
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     name = str(a.get("name", ""))
     if not state.get_skill(name):
         return f'error: no skill named "{name}"'
@@ -119,7 +119,7 @@ async def _load_skill(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _unload_skill(a: dict, ctx: BuiltinContext) -> str:
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     name = str(a.get("name", ""))
     row = state.get_agent(ctx.agent_id)
     if name not in row["loaded_skills"]:

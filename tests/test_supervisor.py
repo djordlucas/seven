@@ -1,9 +1,11 @@
 import asyncio
 
-from conftest import until
-from fake_model import reply
+import pytest
 
+from seven.agent.errors import RefusedError
 from seven.core.state import ROOT_ID
+from tests.conftest import until
+from tests.fake_model import reply
 
 
 async def test_spawn_request_agent_runs_and_reports(started_env):
@@ -20,18 +22,23 @@ async def test_spawn_request_agent_runs_and_reports(started_env):
 
 async def test_spawn_refusals(started_env):
     env = started_env
-    assert "exactly one task" in env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
-                                                          "mode": "request", "tasks": ["1", "2"], "interval_s": None, "max_steps": None})
-    assert "at least one task" in env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
-                                                          "mode": "sequence", "tasks": [], "interval_s": None, "max_steps": None})
-    assert "interval_s applies" in env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
-                                                           "mode": "request", "tasks": ["t"], "interval_s": 5, "max_steps": None})
-    assert "unknown mode" in env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
-                                                     "mode": "weird", "tasks": [], "interval_s": None, "max_steps": None})
+    with pytest.raises(RefusedError, match="exactly one task"):
+        env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
+                                "mode": "request", "tasks": ["1", "2"], "interval_s": None, "max_steps": None})
+    with pytest.raises(RefusedError, match="at least one task"):
+        env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
+                                "mode": "sequence", "tasks": [], "interval_s": None, "max_steps": None})
+    with pytest.raises(RefusedError, match="interval_s applies"):
+        env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
+                                "mode": "request", "tasks": ["t"], "interval_s": 5, "max_steps": None})
+    with pytest.raises(RefusedError, match="unknown mode"):
+        env.sup.spawn(ROOT_ID, {"name": "a", "description": "", "instructions": "",
+                                "mode": "weird", "tasks": [], "interval_s": None, "max_steps": None})
     env.sup.spawn(ROOT_ID, {"name": "dup", "description": "", "instructions": "", "mode": "continuous",
                             "tasks": [], "interval_s": None, "max_steps": None})
-    assert 'already named "dup"' in env.sup.spawn(ROOT_ID, {"name": "dup", "description": "", "instructions": "",
-                                                            "mode": "continuous", "tasks": [], "interval_s": None, "max_steps": None})
+    with pytest.raises(RefusedError, match='already named "dup"'):
+        env.sup.spawn(ROOT_ID, {"name": "dup", "description": "", "instructions": "",
+                                "mode": "continuous", "tasks": [], "interval_s": None, "max_steps": None})
 
 
 async def test_send_and_wait_message(started_env):
@@ -111,4 +118,5 @@ async def test_resolve_by_name(started_env):
                             "tasks": [], "interval_s": None, "max_steps": None})
     r = env.sup.resolve("named")
     assert r["id"] == "a1"
-    assert env.sup.resolve("nope") == 'no agent "nope"'
+    with pytest.raises(RefusedError, match='no agent "nope"'):
+        env.sup.resolve("nope")

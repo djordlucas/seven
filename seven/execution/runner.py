@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import json
 import os
 import signal
@@ -23,7 +24,6 @@ from pathlib import Path
 from ..core.log import Logger, noop_logger, preview
 
 MAX_LOG_CHARS = 1_000_000
-RPC_FD = 3
 
 
 @dataclass
@@ -58,10 +58,8 @@ class RunHandle:
         self._killed = True
         proc = self._proc
         if proc is not None and proc.returncode is None:
-            try:
+            with contextlib.suppress(OSError):
                 os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
 
 
 def scan_imports(source: str) -> set[str]:
@@ -180,10 +178,8 @@ class Runner:
                 f.write(code)
             await self._execute(handle, path, args, timeout_ms, log)
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(path)
-            except OSError:
-                pass
 
     async def _execute(self, handle: RunHandle, file: str, args: object, timeout_ms: int, log: Logger) -> None:
         started = time.time()
@@ -213,10 +209,8 @@ class Runner:
             os.close(rpc_w)
             rpc_w = -1
             if handle._killed:
-                try:
+                with contextlib.suppress(OSError):
                     os.killpg(proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError, OSError):
-                    pass
             handle._state = "running"
             log.info("run started", run_id=handle.id, file=file, pid=proc.pid, timeout_ms=timeout_ms, memory_mb=self.memory_mb)
             proc.stdin.write(json.dumps(req).encode() + b"\n")
@@ -279,10 +273,8 @@ class Runner:
                 timed_out = True
                 handle.kill()
             rpc_task.cancel()
-            try:
+            with contextlib.suppress(OSError):
                 os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
             await proc.wait()
             await asyncio.gather(out_task, err_task, return_exceptions=True)
             all_logs = list(logs) + ([f"… [{dropped} lines dropped]"] if dropped else [])
@@ -307,10 +299,8 @@ class Runner:
                 handle.done.set_result(result)
         finally:
             if rpc_w >= 0:
-                try:
+                with contextlib.suppress(OSError):
                     os.close(rpc_w)
-                except OSError:
-                    pass
             if not handle.done.done():
                 _finish(handle, RunResult(ok=False, error="killed", logs=list(logs), duration_ms=round((time.time() - started) * 1000)))
             handle._state = "done"

@@ -8,7 +8,10 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..core.llm import ChatModel, Completion, ToolDef
 from ..core.log import Logger, noop_logger, preview
@@ -16,7 +19,12 @@ from ..core.state import State, now_iso
 from ..execution.runner import Runner
 from ..execution.runs import RunTable, summarize
 from ..tools.builtins import builtins
-from ..tools.builtins.shared import await_run, disabled_error, format_run, start_generated
+from ..tools.builtins.discovery import META_TOOLS
+from ..tools.builtins.shared import BuiltinContext, await_run, disabled_error, format_run, start_generated
+from ..tools.store import ToolStore
+
+if TYPE_CHECKING:
+    from .supervisor import Supervisor
 from .compact import (
     COMPACT_AT,
     KEEP,
@@ -34,20 +42,20 @@ MAX_RESULT_CHARS = 16_000
 @dataclass
 class AgentDeps:
     state: State
-    store: object
+    store: ToolStore
     runner: Runner
     runs: RunTable
     model: ChatModel
-    supervisor: object
+    supervisor: Supervisor
     workspace: str
     max_steps: int
     context_tokens: int
     spill_chars: int = 2000
-    memory_dir: object = None
-    core_tools: tuple = ()
+    memory_dir: Path | None = None
+    core_tools: tuple[str, ...] = ()
     tool_discovery: bool = True
     log: Logger = noop_logger
-    on_event: object = None
+    on_event: Callable[[dict], None] | None = None
 
 
 class Agent:
@@ -229,7 +237,6 @@ class Agent:
             log.info("message delivered", sender=m["sender"], inbox_id=m["id"], chars=len(m["text"]))
 
     def _spill(self, call_id: str, tool: str, result: str) -> str:
-        from pathlib import Path
         mem = Path(self.deps.memory_dir) if self.deps.memory_dir else Path(self.deps.workspace) / ".seven" / "memory"
         mem.mkdir(parents=True, exist_ok=True)
         path = mem / f"{call_id}.out"
@@ -247,7 +254,6 @@ class Agent:
         bl = builtins()
         row = self.row()
         if self.deps.tool_discovery:
-            from ..tools.builtins.discovery import META_TOOLS
             names = set(self.deps.core_tools) | set(META_TOOLS) | set(row["revealed_tools"])
             for s in row["loaded_skills"]:
                 sk = state.get_skill(s)
@@ -301,10 +307,9 @@ class Agent:
         self.emit({"type": "tool_result", "agent": self.id, "name": name, "result": result})
         return result
 
-    def builtin_context(self, log: Logger):
-        from ..tools.builtins.shared import BuiltinContext
+    def builtin_context(self, log: Logger) -> BuiltinContext:
         return BuiltinContext(agent_id=self.id, runner=self.deps.runner, store=self.deps.store, runs=self.deps.runs,
-                              supervisor=self.deps.supervisor, workspace=self.deps.workspace,
+                              supervisor=self.deps.supervisor, state=self.deps.state, workspace=self.deps.workspace,
                               state_db=self.deps.state.path, abort=self.abort, log=log)
 
     def append(self, message: dict) -> None:

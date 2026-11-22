@@ -15,7 +15,7 @@ import re
 import shutil
 from pathlib import Path
 
-from ..core.state import State
+from ..core.state import State, now_iso
 
 TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 SKILL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -53,12 +53,12 @@ class ToolStore:
         return self.state.is_open
 
     def list(self) -> list[dict]:
-        return [_meta_from_row(r) for r in self.state._all("SELECT * FROM tools ORDER BY name")]
+        return [_meta_from_row(r) for r in self.state.query("SELECT * FROM tools ORDER BY name")]
 
     def get(self, name: str) -> dict | None:
         if not TOOL_NAME.match(name):
             return None
-        r = self.state._one("SELECT * FROM tools WHERE name = ?", (name,))
+        r = self.state.query_one("SELECT * FROM tools WHERE name = ?", (name,))
         if not r:
             return None
         meta = _meta_from_row(r)
@@ -69,9 +69,8 @@ class ToolStore:
              source: str, timeout_ms: int | None = None) -> dict:
         if not TOOL_NAME.match(name):
             raise ValueError(f'invalid tool name "{name}": must match {TOOL_NAME.pattern}')
-        from ..core.state import now_iso
         t = now_iso()
-        self.state._exec(
+        self.state.execute(
             """INSERT INTO tools (name, description, parameters, deps, packages, timeout_ms, revision, source, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                ON CONFLICT (name) DO UPDATE SET
@@ -87,26 +86,25 @@ class ToolStore:
         return saved["meta"]
 
     def set_disabled(self, name: str, reason: str | None) -> bool:
-        from ..core.state import now_iso
-        cur = self.state._exec("UPDATE tools SET disabled_at = ?, disabled_reason = ? WHERE name = ?",
+        cur = self.state.execute("UPDATE tools SET disabled_at = ?, disabled_reason = ? WHERE name = ?",
                                (None if reason is None else now_iso(), reason, name))
         return cur.rowcount > 0
 
     def record_run(self, name: str, record: dict) -> None:
-        if not self.state._one("SELECT 1 FROM tools WHERE name = ?", (name,)):
+        if not self.state.query_one("SELECT 1 FROM tools WHERE name = ?", (name,)):
             return
-        self.state._exec(
+        self.state.execute(
             "INSERT INTO tool_runs (tool, revision, agent, mode, ok, duration_ms, error, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (name, record["revision"], record["agent"], record["mode"], 1 if record["ok"] else 0,
              record["duration_ms"], record.get("error"), record["at"]),
         )
-        self.state._exec(
+        self.state.execute(
             "DELETE FROM tool_runs WHERE tool = ? AND id NOT IN (SELECT id FROM tool_runs WHERE tool = ? ORDER BY id DESC LIMIT ?)",
             (name, name, KEEP_RUNS),
         )
 
     def history(self, name: str, n: int = KEEP_RUNS) -> list[dict]:
-        rows = self.state._all(
+        rows = self.state.query(
             "SELECT * FROM (SELECT * FROM tool_runs WHERE tool = ? ORDER BY id DESC LIMIT ?) ORDER BY id", (name, n))
         out = []
         for r in rows:
@@ -124,8 +122,8 @@ class ToolStore:
         used = self.state.skills_using_tool(name)
         if used:
             raise ToolInUseError(name, used)
-        cur = self.state._exec("DELETE FROM tools WHERE name = ?", (name,))
-        self.state._exec("DELETE FROM tool_runs WHERE tool = ?", (name,))
+        cur = self.state.execute("DELETE FROM tools WHERE name = ?", (name,))
+        self.state.execute("DELETE FROM tool_runs WHERE tool = ?", (name,))
         shutil.rmtree(self.dir / name, ignore_errors=True)
         return cur.rowcount > 0
 

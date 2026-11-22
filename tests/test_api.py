@@ -3,11 +3,11 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from conftest import make_config, until
-from fake_model import ScriptedModel, reply
 
 from seven.api import create_app
 from seven.app import SevenApp
+from tests.conftest import make_config, until
+from tests.fake_model import ScriptedModel, reply
 
 
 @pytest.fixture
@@ -137,8 +137,16 @@ async def test_logs_endpoint(api):
 
 
 async def test_events_sse_route_and_bus(api):
-    routes = {r.path for r in api.app.routes}
-    assert "/api/events" in routes
+    def route_paths(app) -> set:
+        paths, stack = set(), list(app.routes)
+        while stack:
+            r = stack.pop()
+            if hasattr(r, "path"):
+                paths.add(r.path)
+            stack.extend(getattr(getattr(r, "original_router", None), "routes", []) or [])
+        return paths
+
+    assert "/api/events" in route_paths(api.app)
     q = api.seven.subscribe()
     api.model.push(reply("streamed"))
     r = await api.client.post("/api/agents/seven/messages", json={"text": "stream test"})

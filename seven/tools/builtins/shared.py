@@ -5,19 +5,24 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ...core.llm import ToolDef
 from ...core.log import Logger
-from ...core.state import now_iso
+from ...core.state import State, now_iso
 from ...execution.runner import RunHandle, Runner, RunResult
 from ...execution.runs import RunTable
 from ..store import ToolStore
 
+if TYPE_CHECKING:
+    from ...agent.supervisor import Supervisor
+
 
 @dataclass
 class Builtin(ToolDef):
-    run: object
+    run: Callable[[dict, BuiltinContext], Awaitable[str]]
 
 
 @dataclass
@@ -26,7 +31,8 @@ class BuiltinContext:
     runner: Runner
     store: ToolStore
     runs: RunTable
-    supervisor: object
+    supervisor: Supervisor
+    state: State
     workspace: str
     state_db: str
     abort: asyncio.Event | None = None

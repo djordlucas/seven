@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ...agent.errors import RefusedError
 from .shared import Builtin, BuiltinContext, positive
 
 MAX_WAIT_MS = 600_000
@@ -90,17 +91,18 @@ def agent_builtins() -> list:
 
 
 async def _spawn_agent(a: dict, ctx: BuiltinContext) -> str:
-    r = ctx.supervisor.spawn(ctx.agent_id, {
-        "name": str(a.get("name", "")),
-        "description": str(a.get("description", "")),
-        "instructions": str(a.get("instructions", "")),
-        "mode": str(a.get("mode", "")),
-        "tasks": [str(t) for t in a["tasks"]] if isinstance(a.get("tasks"), list) else [],
-        "interval_s": positive(a.get("interval_s"), 0) or None,
-        "max_steps": positive(a.get("max_steps"), 0) or None,
-    })
-    if isinstance(r, str):
-        return f"error: {r}"
+    try:
+        r = ctx.supervisor.spawn(ctx.agent_id, {
+            "name": str(a.get("name", "")),
+            "description": str(a.get("description", "")),
+            "instructions": str(a.get("instructions", "")),
+            "mode": str(a.get("mode", "")),
+            "tasks": [str(t) for t in a["tasks"]] if isinstance(a.get("tasks"), list) else [],
+            "interval_s": positive(a.get("interval_s"), 0) or None,
+            "max_steps": positive(a.get("max_steps"), 0) or None,
+        })
+    except RefusedError as err:
+        return f"error: {err}"
     reply = "" if r["mode"] == "continuous" else "; its final answer will be sent to you as a message"
     return f'spawned {r["id"]} "{r["name"]}" ({r["mode"]}){reply}'
 
@@ -116,8 +118,11 @@ async def _find_agents(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _agent_status(a: dict, ctx: BuiltinContext) -> str:
-    r = ctx.supervisor.resolve(str(a.get("agent", "")))
-    return f"error: {r}" if isinstance(r, str) else ctx.supervisor.status(r)
+    try:
+        r = ctx.supervisor.resolve(str(a.get("agent", "")))
+    except RefusedError as err:
+        return f"error: {err}"
+    return ctx.supervisor.status(r)
 
 
 async def _send_message(a: dict, ctx: BuiltinContext) -> str:
@@ -128,9 +133,10 @@ async def _send_message(a: dict, ctx: BuiltinContext) -> str:
 async def _wait_message(a: dict, ctx: BuiltinContext) -> str:
     frm = None
     if a.get("from") is not None:
-        r = ctx.supervisor.resolve(str(a["from"]))
-        if isinstance(r, str):
-            return f"error: {r}"
+        try:
+            r = ctx.supervisor.resolve(str(a["from"]))
+        except RefusedError as err:
+            return f"error: {err}"
         frm = r["id"]
     timeout_ms = min(positive(a.get("timeout_ms"), 60_000), MAX_WAIT_MS)
     import time
@@ -142,9 +148,10 @@ async def _wait_message(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _stop_agent(a: dict, ctx: BuiltinContext) -> str:
-    r = ctx.supervisor.resolve(str(a.get("agent", "")))
-    if isinstance(r, str):
-        return f"error: {r}"
+    try:
+        r = ctx.supervisor.resolve(str(a.get("agent", "")))
+    except RefusedError as err:
+        return f"error: {err}"
     out = ctx.supervisor.stop(r["id"], ctx.agent_id, None if a.get("reason") is None else str(a["reason"]))
     return out if out.startswith("stopped") else f"error: {out}"
 

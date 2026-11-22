@@ -8,16 +8,113 @@ server process runs agents.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
 TERMINAL = ("done", "failed", "stopped")
 ROOT_ID = "seven"
+SUPERVISOR = "supervisor"
 LEASE_STALE_MS = 15_000
+
+
+class AgentRow(TypedDict, total=False):
+    id: str
+    name: str
+    description: str
+    instructions: str
+    parent: str | None
+    mode: str
+    status: str
+    interval_s: int | None
+    max_steps: int | None
+    result: str | None
+    error: str | None
+    created_at: str
+    updated_at: str
+    finished_at: str | None
+    last_turn_at: str | None
+    summary: str | None
+    context_from: int
+    compactions: int
+    loaded_skills: list[str]
+    revealed_tools: list[str]
+
+
+class InboxItem(TypedDict, total=False):
+    id: int
+    agent: str
+    sender: str
+    kind: str
+    text: str
+    created_at: str
+    delivered_at: str | None
+
+
+class OutboxItem(TypedDict, total=False):
+    id: int
+    sender: str
+    recipient: str
+    kind: str
+    text: str
+    created_at: str
+    delivered_at: str | None
+
+
+class RunRow(TypedDict, total=False):
+    id: str
+    agent: str
+    tool: str
+    status: str
+    ok: bool | None
+    value: object
+    error: str | None
+    logs: list[str]
+    duration_ms: int | None
+    started_at: str
+    checked: bool
+
+
+class Job(TypedDict, total=False):
+    id: str
+    kind: str
+    spec: dict
+    agent: str
+    status: str
+    result: str | None
+    error: str | None
+    turns: int
+    queued: int
+    last_turn_at: str | None
+    next_run_at: str | None
+    created_by: str
+    created_at: str
+    updated_at: str
+    finished_at: str | None
+
+
+class Skill(TypedDict, total=False):
+    name: str
+    description: str
+    instructions: str
+    tools: list[str]
+    created_at: str
+    updated_at: str
+
+
+class Output(TypedDict, total=False):
+    id: str
+    agent: str
+    tool: str
+    path: str
+    chars: int
+    lines: int
+    created_at: str
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -194,7 +291,7 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _row_to_agent(r: sqlite3.Row) -> dict:
+def _row_to_agent(r: sqlite3.Row) -> AgentRow:
     d = dict(r)
     return {
         "id": d["id"], "name": d["name"], "description": d["description"], "instructions": d["instructions"],
@@ -209,12 +306,12 @@ def _row_to_agent(r: sqlite3.Row) -> dict:
     }
 
 
-def _row_to_inbox(r: sqlite3.Row) -> dict:
+def _row_to_inbox(r: sqlite3.Row) -> InboxItem:
     d = dict(r)
     return {"id": d["id"], "agent": d["agent"], "sender": d["sender"], "kind": d["kind"], "text": d["text"], "created_at": d["created_at"]}
 
 
-def _row_to_run(r: sqlite3.Row) -> dict:
+def _row_to_run(r: sqlite3.Row) -> RunRow:
     d = dict(r)
     return {
         "id": d["id"], "agent": d["agent"], "tool": d["tool"], "status": d["status"],
@@ -249,11 +346,8 @@ class State:
         return self.db is not None
 
     def close(self) -> None:
-        with self._lock:
-            try:
-                self.db.close()
-            except sqlite3.Error:
-                pass
+        with self._lock, contextlib.suppress(sqlite3.Error):
+            self.db.close()
 
     def tx(self, fn):
         with self._lock:
@@ -270,7 +364,7 @@ class State:
                 self._in_tx -= 1
 
     def _migrate(self) -> None:
-        row = self._one("SELECT value FROM meta WHERE key = 'schema_version'")
+        row = self.query_one("SELECT value FROM meta WHERE key = 'schema_version'")
         frm = int(row[0]) if row else 1
         if frm > SCHEMA_VERSION:
             raise RuntimeError(f"{self.path} is schema version {frm}; this seven knows up to {SCHEMA_VERSION}")
@@ -292,18 +386,18 @@ class State:
             row = self.db.execute("SELECT value FROM meta WHERE key = ?", (counter,)).fetchone()
             return int(row[0])
 
-    def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
             cur = self.db.execute(sql, params)
             if self._in_tx == 0:
                 self.db.commit()
             return cur
 
-    def _all(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+    def query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         with self._lock:
             return self.db.execute(sql, params).fetchall()
 
-    def _one(self, sql: str, params: tuple = ()) -> sqlite3.Row | None:
+    def query_one(self, sql: str, params: tuple = ()) -> sqlite3.Row | None:
         with self._lock:
             return self.db.execute(sql, params).fetchone()
 
@@ -311,19 +405,19 @@ class State:
                      parent: str | None, mode: str, interval_s: int | None = None, max_steps: int | None = None) -> dict:
         agent_id = id or f"a{self._next('agent_seq')}"
         t = now_iso()
-        self._exec(
+        self.execute(
             "INSERT INTO agents (id, name, description, instructions, parent, mode, status, interval_s, max_steps, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?, ?)",
             (agent_id, name, description, instructions, parent, mode, interval_s, max_steps, t, t),
         )
         return self.get_agent(agent_id)
 
-    def get_agent(self, agent_id: str) -> dict | None:
-        r = self._one("SELECT * FROM agents WHERE id = ?", (agent_id,))
+    def get_agent(self, agent_id: str) -> AgentRow | None:
+        r = self.query_one("SELECT * FROM agents WHERE id = ?", (agent_id,))
         return _row_to_agent(r) if r else None
 
-    def list_agents(self) -> list[dict]:
-        return [_row_to_agent(r) for r in self._all("SELECT * FROM agents ORDER BY created_at, id")]
+    def list_agents(self) -> list[AgentRow]:
+        return [_row_to_agent(r) for r in self.query("SELECT * FROM agents ORDER BY created_at, id")]
 
     def update_agent(self, agent_id: str, **fields) -> None:
         if not fields:
@@ -340,30 +434,30 @@ class State:
         sets.append("updated_at = ?")
         params.append(now_iso())
         params.append(agent_id)
-        self._exec(f"UPDATE agents SET {', '.join(sets)} WHERE id = ?", tuple(params))
+        self.execute(f"UPDATE agents SET {', '.join(sets)} WHERE id = ?", tuple(params))
 
     def append_message(self, agent_id: str, message: dict) -> int:
-        cur = self._exec("INSERT INTO messages (agent, body, created_at) VALUES (?, ?, ?)", (agent_id, json.dumps(message), now_iso()))
+        cur = self.execute("INSERT INTO messages (agent, body, created_at) VALUES (?, ?, ?)", (agent_id, json.dumps(message), now_iso()))
         return int(cur.lastrowid)
 
     def history(self, agent_id: str) -> list[dict]:
-        rows = self._all(
+        rows = self.query(
             "SELECT m.id, m.body FROM messages m JOIN agents a ON a.id = m.agent WHERE m.agent = ? AND m.id > a.context_from ORDER BY m.id",
             (agent_id,),
         )
         return [{"id": r["id"], "message": json.loads(r["body"])} for r in rows]
 
     def transcript(self, agent_id: str, limit: int = 1000, offset: int = 0) -> list[dict]:
-        rows = self._all("SELECT id, body, created_at FROM messages WHERE agent = ? ORDER BY id LIMIT ? OFFSET ?", (agent_id, limit, offset))
+        rows = self.query("SELECT id, body, created_at FROM messages WHERE agent = ? ORDER BY id LIMIT ? OFFSET ?", (agent_id, limit, offset))
         return [{"id": r["id"], "created_at": r["created_at"], "message": json.loads(r["body"])} for r in rows]
 
     def transcript_count(self, agent_id: str) -> int:
-        r = self._one("SELECT count(*) AS n FROM messages WHERE agent = ?", (agent_id,))
+        r = self.query_one("SELECT count(*) AS n FROM messages WHERE agent = ?", (agent_id,))
         return int(r["n"])
 
     def context(self, agent_id: str) -> list[dict]:
         agent = self.get_agent(agent_id)
-        rows = self._all("SELECT id, body FROM messages WHERE agent = ? AND id > ? ORDER BY id", (agent_id, agent["context_from"] if agent else 0))
+        rows = self.query("SELECT id, body FROM messages WHERE agent = ? AND id > ? ORDER BY id", (agent_id, agent["context_from"] if agent else 0))
         return [{"id": r["id"], "message": json.loads(r["body"])} for r in rows]
 
     def clear_conversation(self, agent_id: str) -> None:
@@ -373,16 +467,16 @@ class State:
         self.tx(work)
 
     def compact(self, agent_id: str, summary: str, context_from: int) -> None:
-        self._exec(
+        self.execute(
             "UPDATE agents SET summary = ?, context_from = ?, compactions = compactions + 1, updated_at = ? WHERE id = ?",
             (summary, context_from, now_iso(), agent_id),
         )
 
     def enqueue(self, agent_id: str, *, sender: str, kind: str, text: str) -> int:
-        cur = self._exec("INSERT INTO inbox (agent, sender, kind, text, created_at) VALUES (?, ?, ?, ?, ?)", (agent_id, sender, kind, text, now_iso()))
+        cur = self.execute("INSERT INTO inbox (agent, sender, kind, text, created_at) VALUES (?, ?, ?, ?, ?)", (agent_id, sender, kind, text, now_iso()))
         return int(cur.lastrowid)
 
-    def pending(self, agent_id: str, kind: str | None = None, sender: str | None = None) -> list[dict]:
+    def pending(self, agent_id: str, kind: str | None = None, sender: str | None = None) -> list[InboxItem]:
         sql = "SELECT * FROM inbox WHERE agent = ? AND delivered_at IS NULL"
         params: list = [agent_id]
         if kind:
@@ -392,39 +486,39 @@ class State:
             sql += " AND sender = ?"
             params.append(sender)
         sql += " ORDER BY id"
-        return [_row_to_inbox(r) for r in self._all(sql, tuple(params))]
+        return [_row_to_inbox(r) for r in self.query(sql, tuple(params))]
 
     def mark_delivered(self, inbox_id: int) -> None:
-        self._exec("UPDATE inbox SET delivered_at = ? WHERE id = ?", (now_iso(), inbox_id))
+        self.execute("UPDATE inbox SET delivered_at = ? WHERE id = ?", (now_iso(), inbox_id))
 
     def insert_run(self, agent: str, tool: str) -> str:
         rid = f"r{self._next('run_seq')}"
-        self._exec("INSERT INTO runs (id, agent, tool, status, started_at) VALUES (?, ?, ?, 'running', ?)", (rid, agent, tool, now_iso()))
+        self.execute("INSERT INTO runs (id, agent, tool, status, started_at) VALUES (?, ?, ?, 'running', ?)", (rid, agent, tool, now_iso()))
         return rid
 
     def finish_run(self, rid: str, result: dict) -> None:
-        self._exec(
+        self.execute(
             "UPDATE runs SET status = 'done', ok = ?, value = ?, error = ?, logs = ?, duration_ms = ?, checked = 0 WHERE id = ?",
             (1 if result.get("ok") else 0, json.dumps(result.get("value")) if result.get("ok") else None,
              result.get("error"), json.dumps(result.get("logs", [])), result.get("duration_ms"), rid),
         )
 
-    def get_run(self, rid: str) -> dict | None:
-        r = self._one("SELECT * FROM runs WHERE id = ?", (rid,))
+    def get_run(self, rid: str) -> RunRow | None:
+        r = self.query_one("SELECT * FROM runs WHERE id = ?", (rid,))
         return _row_to_run(r) if r else None
 
-    def list_runs(self, agent: str | None = None, limit: int = 50) -> list[dict]:
+    def list_runs(self, agent: str | None = None, limit: int = 50) -> list[RunRow]:
         if agent:
-            rows = self._all("SELECT * FROM runs WHERE agent = ? ORDER BY started_at DESC, id DESC LIMIT ?", (agent, limit))
+            rows = self.query("SELECT * FROM runs WHERE agent = ? ORDER BY started_at DESC, id DESC LIMIT ?", (agent, limit))
         else:
-            rows = self._all("SELECT * FROM runs ORDER BY started_at DESC, id DESC LIMIT ?", (limit,))
+            rows = self.query("SELECT * FROM runs ORDER BY started_at DESC, id DESC LIMIT ?", (limit,))
         return [_row_to_run(r) for r in rows]
 
     def mark_run_checked(self, rid: str) -> None:
-        self._exec("UPDATE runs SET checked = 1 WHERE id = ?", (rid,))
+        self.execute("UPDATE runs SET checked = 1 WHERE id = ?", (rid,))
 
     def mark_lost_runs(self) -> int:
-        cur = self._exec("UPDATE runs SET status = 'lost', error = 'lost: seven restarted while it ran' WHERE status = 'running'")
+        cur = self.execute("UPDATE runs SET status = 'lost', error = 'lost: seven restarted while it ran' WHERE status = 'running'")
         return cur.rowcount
 
     # ── mail (R2): inbox + outbox, written in one transaction ──
@@ -439,8 +533,8 @@ class State:
             return inbox_id
         return self.tx(work)
 
-    def list_outbox(self, sender: str, limit: int = 100) -> list[dict]:
-        rows = self._all(
+    def list_outbox(self, sender: str, limit: int = 100) -> list[OutboxItem]:
+        rows = self.query(
             "SELECT o.id, o.sender, o.recipient, o.kind, o.text, o.created_at, i.delivered_at FROM outbox o"
             " LEFT JOIN inbox i ON i.id = o.inbox_id WHERE o.sender = ? ORDER BY o.id DESC LIMIT ?",
             (sender, limit),
@@ -449,21 +543,21 @@ class State:
 
     # ── jobs (R1) ──
 
-    def create_job(self, *, kind: str, spec: dict, agent: str, created_by: str) -> dict:
+    def create_job(self, *, kind: str, spec: dict, agent: str, created_by: str) -> Job:
         jid = f"j{self._next('job_seq')}"
         t = now_iso()
-        self._exec(
+        self.execute(
             "INSERT INTO jobs (id, kind, spec, agent, status, turns, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, 'running', 0, ?, ?, ?)",
             (jid, kind, json.dumps(spec), agent, created_by, t, t),
         )
         return self.get_job(jid)
 
-    def get_job(self, jid: str) -> dict | None:
-        r = self._one("SELECT * FROM jobs WHERE id = ?", (jid,))
+    def get_job(self, jid: str) -> Job | None:
+        r = self.query_one("SELECT * FROM jobs WHERE id = ?", (jid,))
         return dict(r) | {"spec": json.loads(r["spec"])} if r else None
 
-    def list_jobs(self, all: bool = False) -> list[dict]:
-        rows = self._all("SELECT * FROM jobs ORDER BY created_at, id")
+    def list_jobs(self, all: bool = False) -> list[Job]:
+        rows = self.query("SELECT * FROM jobs ORDER BY created_at, id")
         out = []
         for r in rows:
             d = dict(r)
@@ -485,13 +579,13 @@ class State:
         sets.append("updated_at = ?")
         params.append(now_iso())
         params.append(jid)
-        self._exec(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", tuple(params))
+        self.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", tuple(params))
 
     # ── skills (R4) ──
 
-    def save_skill(self, *, name: str, description: str, instructions: str, tools: list[str]) -> dict:
+    def save_skill(self, *, name: str, description: str, instructions: str, tools: list[str]) -> Skill:
         t = now_iso()
-        self._exec(
+        self.execute(
             "INSERT INTO skills (name, description, instructions, tools, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
             " ON CONFLICT (name) DO UPDATE SET description = excluded.description, instructions = excluded.instructions,"
             " tools = excluded.tools, updated_at = excluded.updated_at",
@@ -499,16 +593,16 @@ class State:
         )
         return self.get_skill(name)
 
-    def get_skill(self, name: str) -> dict | None:
-        r = self._one("SELECT * FROM skills WHERE name = ?", (name,))
+    def get_skill(self, name: str) -> Skill | None:
+        r = self.query_one("SELECT * FROM skills WHERE name = ?", (name,))
         if not r:
             return None
         d = dict(r)
         d["tools"] = json.loads(d["tools"])
         return d
 
-    def list_skills(self) -> list[dict]:
-        return [self.get_skill(r["name"]) for r in self._all("SELECT name FROM skills ORDER BY name")]
+    def list_skills(self) -> list[Skill]:
+        return [self.get_skill(r["name"]) for r in self.query("SELECT name FROM skills ORDER BY name")]
 
     def delete_skill(self, name: str) -> bool:
         def work():
@@ -524,7 +618,7 @@ class State:
         return self.tx(work)
 
     def skills_using_tool(self, tool: str) -> list[str]:
-        rows = self._all("SELECT name FROM skills, json_each(skills.tools) WHERE json_each.value = ?", (tool,))
+        rows = self.query("SELECT name FROM skills, json_each(skills.tools) WHERE json_each.value = ?", (tool,))
         return [r["name"] for r in rows]
 
     # ── per-agent revealed tools / loaded skills (R3b, R4) ──
@@ -540,11 +634,11 @@ class State:
     # ── output memory (R3a) ──
 
     def record_output(self, *, oid: str, agent: str, tool: str, path: str, chars: int, lines: int) -> None:
-        self._exec("INSERT OR REPLACE INTO outputs (id, agent, tool, path, chars, lines, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        self.execute("INSERT OR REPLACE INTO outputs (id, agent, tool, path, chars, lines, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                    (oid, agent, tool, path, chars, lines, now_iso()))
 
-    def get_output(self, oid: str) -> dict | None:
-        r = self._one("SELECT * FROM outputs WHERE id = ?", (oid,))
+    def get_output(self, oid: str) -> Output | None:
+        r = self.query_one("SELECT * FROM outputs WHERE id = ?", (oid,))
         return dict(r) if r else None
 
     def acquire_lease(self, stale_ms: int = LEASE_STALE_MS) -> str | None:
@@ -562,10 +656,10 @@ class State:
 
     def heartbeat_lease(self) -> None:
         now_ms = int(datetime.now(UTC).timestamp() * 1000)
-        self._exec("UPDATE lease SET heartbeat_at = ? WHERE id = 1 AND pid = ?", (now_ms, os.getpid()))
+        self.execute("UPDATE lease SET heartbeat_at = ? WHERE id = 1 AND pid = ?", (now_ms, os.getpid()))
 
     def release_lease(self) -> None:
-        self._exec("DELETE FROM lease WHERE id = 1 AND pid = ?", (os.getpid(),))
+        self.execute("DELETE FROM lease WHERE id = 1 AND pid = ?", (os.getpid(),))
 
 
 def _pid_alive(pid: int) -> bool:
