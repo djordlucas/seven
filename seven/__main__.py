@@ -114,7 +114,7 @@ def _send(cfg, ref: str, text: str) -> int:
 def _tools(cfg) -> int:
     state = State(cfg.state_db)
     try:
-        rows = state._all("SELECT name, revision, timeout_ms, disabled_at, disabled_reason, updated_at FROM tools ORDER BY name")
+        rows = state.query("SELECT name, revision, timeout_ms, disabled_at, disabled_reason, updated_at FROM tools ORDER BY name")
         if not rows:
             print("no tools")
             return 0

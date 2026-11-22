@@ -7,7 +7,7 @@ test:
 	python -m pytest tests/ -q
 
 eval:
-	python evals/run.py
+	python -m evals.run
 
 lint:
 	python -m ruff check seven tests evals

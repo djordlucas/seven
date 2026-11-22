@@ -36,3 +36,10 @@ def test_overrides(tmp_path, monkeypatch):
                        "SEVEN_LOG_LEVEL": "debug", "SEVEN_CONTEXT_TOKENS": "1000"})
     assert cfg.workspace == (tmp_path / "ws").resolve()
     assert cfg.run_timeout_ms == 5000 and cfg.log_level == "debug" and cfg.context_tokens == 1000
+
+
+def test_spill_chars_zero_disables_spilling(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert load_config({"SEVEN_SPILL_CHARS": "0"}).spill_chars == 0
+    assert load_config({"SEVEN_SPILL_CHARS": "500"}).spill_chars == 500
+    assert load_config({"SEVEN_SPILL_CHARS": "-5"}).spill_chars == 2000

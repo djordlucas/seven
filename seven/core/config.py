@@ -15,14 +15,16 @@ def parse_level(v: str | None, fallback: str) -> str:
     return v.lower() if v and v.lower() in LEVELS else fallback
 
 
-def _int(v: str | None, fallback: int) -> int:
+def _int(v: str | None, fallback: int, *, allow_zero: bool = False) -> int:
     if v is None:
         return fallback
     try:
         n = int(v)
     except ValueError:
         return fallback
-    return n if n > 0 else fallback
+    if n > 0 or (allow_zero and n == 0):
+        return n
+    return fallback
 
 
 @dataclass
@@ -130,7 +132,7 @@ def load_config(env: dict | None = None) -> Config:
         log_level=parse_level(env.get("SEVEN_LOG_LEVEL"), "info"),
         log_file=log_file,
         log_stderr=None if stderr_env is None else stderr_env == "1",
-        spill_chars=_int(env.get("SEVEN_SPILL_CHARS"), 2000),
+        spill_chars=_int(env.get("SEVEN_SPILL_CHARS"), 2000, allow_zero=True),
         memory_dir=Path(env.get("SEVEN_MEMORY_DIR") or ".seven/memory"),
         core_tools=tuple(
             (env.get("SEVEN_CORE_TOOLS") or "run_python,define_tool,read_tool,delegate,send_message,wait_message,spawn_agent,read_memory").split(",")

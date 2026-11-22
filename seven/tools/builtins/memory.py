@@ -36,7 +36,7 @@ async def _read_memory(a: dict, ctx: BuiltinContext) -> str:
     oid = str(a.get("id", ""))
     if not MEMORY_ID.match(oid):
         return f'error: invalid memory id "{oid}"'
-    out = ctx.supervisor.opts.state.get_output(oid)
+    out = ctx.state.get_output(oid)
     memory_dir = Path(ctx.workspace) / ".seven" / "memory"
     if not out:
         candidate = memory_dir / f"{oid}.out"

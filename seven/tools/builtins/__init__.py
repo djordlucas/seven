@@ -14,24 +14,26 @@ from .shared import Builtin, BuiltinContext
 from .skills import skill_builtins
 from .sql import sql_builtins
 
-_cache: dict[str, Builtin] | None = None
+
+def _build() -> dict[str, Builtin]:
+    names: set[str] = set()
+
+    def is_builtin(name: str) -> bool:
+        return name in names
+
+    blist = [
+        *code_builtins(is_builtin), *run_builtins(is_builtin), *agent_builtins(), *sql_builtins(),
+        *mail_builtins(), *job_builtins(), *skill_builtins(), *memory_builtins(), *discovery_builtins(),
+    ]
+    names.update(b.name for b in blist)
+    return {b.name: b for b in blist}
+
+
+BUILTINS = _build()
 
 
 def builtins() -> dict[str, Builtin]:
-    global _cache
-    if _cache is None:
-        names: set[str] = set()
-
-        def is_builtin(name: str) -> bool:
-            return name in names
-
-        blist = [
-            *code_builtins(is_builtin), *run_builtins(is_builtin), *agent_builtins(), *sql_builtins(),
-            *mail_builtins(), *job_builtins(), *skill_builtins(), *memory_builtins(), *discovery_builtins(),
-        ]
-        names.update(b.name for b in blist)
-        _cache = {b.name: b for b in blist}
-    return _cache
+    return BUILTINS
 
 
-__all__ = ["Builtin", "BuiltinContext", "builtins"]
+__all__ = ["BUILTINS", "Builtin", "BuiltinContext", "builtins"]

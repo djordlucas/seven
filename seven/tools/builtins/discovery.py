@@ -46,7 +46,7 @@ def _all_tools(ctx: BuiltinContext) -> list[dict]:
 
 
 async def _list_tools(a: dict, ctx: BuiltinContext) -> str:
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     row = state.get_agent(ctx.agent_id)
     revealed = set(row["revealed_tools"])
     loaded_tools: set[str] = set()
@@ -72,7 +72,7 @@ async def _list_tools(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _describe_tool(a: dict, ctx: BuiltinContext) -> str:
-    state = ctx.supervisor.opts.state
+    state = ctx.state
     name = str(a.get("name", ""))
     bl = _builtins().get(name)
     own = None if bl else ctx.store.get(name)

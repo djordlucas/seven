@@ -1,16 +1,15 @@
 
-from conftest import until
-from fake_model import reply, tc
-
 from seven.agent import Agent, AgentDeps
 from seven.core.state import ROOT_ID
 from seven.tools.builtins import builtins
 from seven.tools.builtins.shared import BuiltinContext
+from tests.conftest import until
+from tests.fake_model import reply, tc
 
 
 def make_ctx(env, agent_id="seven") -> BuiltinContext:
     return BuiltinContext(agent_id=agent_id, runner=env.runner, store=env.store, runs=env.runs,
-                          supervisor=env.sup, workspace=str(env.cfg.workspace), state_db=env.state.path,
+                          supervisor=env.sup, state=env.state, workspace=str(env.cfg.workspace), state_db=env.state.path,
                           abort=None, log=env.log.child(agent=agent_id))
 
 

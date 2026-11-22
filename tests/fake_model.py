@@ -31,6 +31,9 @@ class ScriptedModel:
     def push(self, r) -> None:
         self.replies.append(r)
 
+    async def close(self) -> None:
+        return None
+
     async def complete(self, *, messages, tools=None, max_tokens=None, abort=None, log=noop_logger) -> Completion:
         self.requests.append({"messages": messages, "tools": tools, "max_tokens": max_tokens})
         if abort is not None and abort.is_set():

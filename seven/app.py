@@ -8,15 +8,17 @@ import time
 
 from .agent.supervisor import Supervisor, SupervisorOpts
 from .core.config import Config, load_config
-from .core.llm import Mistral
+from .core.llm import ChatModel, Mistral
 from .core.log import Logger
 from .core.state import State
 from .execution.runner import Runner
 from .tools import ToolStore
 
+LEASE_HEARTBEAT_S = 5
+
 
 class SevenApp:
-    def __init__(self, config: Config | None = None, *, model=None, log_stderr: bool | None = None):
+    def __init__(self, config: Config | None = None, *, model: ChatModel | None = None, log_stderr: bool | None = None):
         self.config = config or load_config()
         cfg = self.config
         stderr = log_stderr if log_stderr is not None else (cfg.log_stderr if cfg.log_stderr is not None else True)
@@ -26,8 +28,8 @@ class SevenApp:
         cfg.tmp_dir.mkdir(parents=True, exist_ok=True)
         self.state = State(cfg.state_db)
         self.store = ToolStore(self.state, cfg.tools_dir)
-        self.model = model or Mistral(api_key=cfg.api_key, model=cfg.model, endpoint=cfg.endpoint,
-                                      concurrency=cfg.llm_concurrency)
+        self.model: ChatModel = model or Mistral(api_key=cfg.api_key, model=cfg.model, endpoint=cfg.endpoint,
+                                                 concurrency=cfg.llm_concurrency)
         self.runner = Runner(home=cfg.home, cwd=str(cfg.workspace), timeout_ms=cfg.run_timeout_ms,
                              memory_mb=cfg.run_memory_mb, host={"llm": {"chat": self._host_llm_chat}}, log=self.log)
         self._subscribers: set[asyncio.Queue] = set()
@@ -68,7 +70,7 @@ class SevenApp:
 
     async def _heartbeat_loop(self) -> None:
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(LEASE_HEARTBEAT_S)
             try:
                 self.state.heartbeat_lease()
             except Exception:
@@ -80,8 +82,7 @@ class SevenApp:
             self._heartbeat.cancel()
         await self.supervisor.shutdown()
         await self.runner.shutdown()
-        if hasattr(self.model, "close"):
-            await self.model.close()
+        await self.model.close()
         if self._lease_held:
             self.state.release_lease()
         self.state.close()

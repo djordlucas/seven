@@ -73,6 +73,6 @@ def test_lease(tmp_path):
     st.close()
     st2 = State(tmp_path / "db.sqlite")
     hb = int(time.time() * 1000) - 60_000
-    st2._exec("UPDATE lease SET heartbeat_at = ? WHERE id = 1", (hb,))
+    st2.execute("UPDATE lease SET heartbeat_at = ? WHERE id = 1", (hb,))
     assert st2.acquire_lease() is None
     st2.close()

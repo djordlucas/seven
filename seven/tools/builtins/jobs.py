@@ -4,6 +4,7 @@ only; assigning one to another agent is the supervisor's job."""
 
 from __future__ import annotations
 
+from ...agent.errors import RefusedError
 from .shared import Builtin, BuiltinContext, positive
 
 
@@ -59,9 +60,10 @@ async def _start_job(a: dict, ctx: BuiltinContext) -> str:
         "interval_s": positive(a.get("interval_s"), 0) or None,
         "max_turns": positive(a.get("max_turns"), 20),
     }
-    job = sup.start_job(ctx.agent_id, kind, spec, agent=str(agent) if agent is not None else None)
-    if isinstance(job, str):
-        return f"error: {job}"
+    try:
+        job = sup.start_job(ctx.agent_id, kind, spec, agent=str(agent) if agent is not None else None)
+    except RefusedError as err:
+        return f"error: {err}"
     return f'started {job["id"]} ({kind}) on {job["agent"]}'
 
 
@@ -71,7 +73,7 @@ async def _stop_job(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _list_jobs(a: dict, ctx: BuiltinContext) -> str:
-    rows = ctx.supervisor.opts.state.list_jobs(all=a.get("all") is True)
+    rows = ctx.state.list_jobs(all=a.get("all") is True)
     if not rows:
         return "no jobs"
     lines = []
