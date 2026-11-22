@@ -264,28 +264,20 @@ class Runner:
                         proc.stdin.write(json.dumps(resp).encode() + b"\n")
                         await proc.stdin.drain()
                     elif "result" in msg:
-                        _finish(handle, _mk_result(msg["result"], logs, dropped, started))
+                        raw_result.set_result(msg["result"])
                         return
 
+            raw_result: asyncio.Future = asyncio.get_running_loop().create_future()
             out_task = asyncio.create_task(read_stream(proc.stdout, ""))
             err_task = asyncio.create_task(read_stream(proc.stderr, "[stderr] "))
             rpc_task = asyncio.create_task(rpc_loop())
             exit_task = asyncio.create_task(proc.wait())
+            timed_out = False
             try:
-                await asyncio.wait_for(asyncio.wait({handle.done, exit_task}, return_when=asyncio.FIRST_COMPLETED), timeout=timeout_ms / 1000)
+                await asyncio.wait_for(asyncio.wait({raw_result, exit_task}, return_when=asyncio.FIRST_COMPLETED), timeout=timeout_ms / 1000)
             except TimeoutError:
+                timed_out = True
                 handle.kill()
-                result = RunResult(ok=False, error=f"timed out after {timeout_ms}ms", logs=list(logs) + ([f"… [{dropped} lines dropped]"] if dropped else []), duration_ms=round((time.time() - started) * 1000))
-                _finish(handle, result)
-            if not handle.done.done():
-                code = exit_task.result()
-                err_tail = [l for l in logs if l.startswith("[stderr] ")][-20:]
-                if handle._killed:
-                    result = RunResult(ok=False, error="killed", logs=list(logs), duration_ms=round((time.time() - started) * 1000))
-                else:
-                    sig = f"signal {signal.Signals(-code).name}" if code and code < 0 else f"code {code}"
-                    result = RunResult(ok=False, error=f"process exited ({sig})" + ("\n" + "\n".join(err_tail) if err_tail else ""), logs=list(logs), duration_ms=round((time.time() - started) * 1000))
-                _finish(handle, result)
             rpc_task.cancel()
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -293,6 +285,21 @@ class Runner:
                 pass
             await proc.wait()
             await asyncio.gather(out_task, err_task, return_exceptions=True)
+            all_logs = list(logs) + ([f"… [{dropped} lines dropped]"] if dropped else [])
+            duration_ms = round((time.time() - started) * 1000)
+            if raw_result.done() and not timed_out:
+                result = _mk_result(raw_result.result(), all_logs, 0, started)
+            elif timed_out:
+                result = RunResult(ok=False, error=f"timed out after {timeout_ms}ms", logs=all_logs, duration_ms=duration_ms)
+            else:
+                code = exit_task.result()
+                err_tail = [l for l in all_logs if l.startswith("[stderr] ")][-20:]
+                if handle._killed:
+                    result = RunResult(ok=False, error="killed", logs=all_logs, duration_ms=duration_ms)
+                else:
+                    sig = f"signal {signal.Signals(-code).name}" if code and code < 0 else f"code {code}"
+                    result = RunResult(ok=False, error=f"process exited ({sig})" + ("\n" + "\n".join(err_tail) if err_tail else ""), logs=all_logs, duration_ms=duration_ms)
+            _finish(handle, result)
         except Exception as err:
             log.error("run could not start", run_id=handle.id, error=err)
             result = RunResult(ok=False, error=str(err), logs=list(logs), duration_ms=round((time.time() - started) * 1000))

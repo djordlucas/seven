@@ -1,8 +1,8 @@
 # 0002: Agent architecture fine tuning
 
-Status: **proposed** — requirements recorded below with proposed designs
-under discussion; no code changes until the designs are accepted and this ADR
-moves to accepted.
+Status: **accepted** — implemented on `feat/implement-r1-r5` (R1–R5, state
+schema v2, 35 built-ins, API + UI surfaces, `evals/run.py`; gate `make ci`
+= ruff + pytest + evals).
 
 ## Context
 
@@ -148,12 +148,13 @@ non-zero on any failure; failed evals keep their workspace for inspection.
 
 ## Verification
 
-- Unit tests per requirement, no network: job lifecycle incl. restart resume
-  and goal check; mail round-trip (inbox + outbox, supervisor commands);
-  spill + `read_memory` round-trip; discovery reveal persistence; skills CRUD
-  and the delete-protection refusal; `delegate` success and timeout.
-- Eval suite (R5) confirms whole features end to end against a scripted model.
-- Gate: `make ci` (pytest + ruff + evals). Docs updated in the same change.
+- Tests per requirement, no network: job lifecycle incl. restart resume and
+  goal check; mail round-trip (inbox + outbox, supervisor commands); spill +
+  `read_memory` round-trip; discovery reveal persistence; skills CRUD and the
+  delete-protection refusal; `delegate` success and timeout.
+- Eval suite (R5) confirms whole features end to end against a scripted model
+  (`evals/run.py`).
+- Gate: `make ci` (ruff + pytest + evals). Docs updated in the same change.
 
 ## Limits
 

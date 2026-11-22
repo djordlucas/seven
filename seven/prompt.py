@@ -8,7 +8,8 @@ import sys
 MAX_LISTED_AGENTS = 20
 
 
-def system_prompt(*, workspace: str, self: dict, tools: list[dict], runs: list[str], agents: list[dict]) -> str:
+def system_prompt(*, workspace: str, self: dict, tools: list[dict], runs: list[str], agents: list[dict],
+                  skills: list[dict] | None = None, loaded_skills: set | None = None) -> str:
     enabled = [t for t in tools if not t.get("disabled")]
     disabled = [t for t in tools if t.get("disabled")]
     names = ", ".join(t["name"] for t in enabled) or "none enabled"
@@ -16,6 +17,13 @@ def system_prompt(*, workspace: str, self: dict, tools: list[dict], runs: list[s
     if disabled:
         why = "; ".join(f"{t['name']} ({t['disabled']['reason']})" for t in disabled)
         own += f" Disabled, and not in your tool list: {why}."
+    skills_sec = ""
+    if skills:
+        loaded_skills = loaded_skills or set()
+        listing = "\n".join(f'- {s["name"]}{" (loaded)" if s["name"] in loaded_skills else ""}: {s["description"]} [tools: {", ".join(s["tools"]) or "none"}]' for s in skills)
+        skills_sec = f"\n\n## Skills\n\nSkills bundle tools with standing instructions. Yours are not all loaded: list_skills shows them, load_skill loads one (its tools become callable and its instructions apply from your next step), unload_skill removes it.\n{listing}"
+    discovery_sec = ("\n\n## Your tool list is small on purpose\n\nOnly core tools and the tools of your loaded skills are in your tool list. Use list_tools to see everything (built-ins and generated tools) and describe_tool to add one to your tool list — it stays callable from your next step. Long tool output is not put in your context whole: it is saved to memory and the result tells you the id; read it in chunks with read_memory(id, from, to).\n"
+                     "\n## Delegation\n\nFor long or independent sub-tasks, delegate to a sub-agent instead of doing everything yourself: delegate(task, instructions?) returns only the sub-agent's final answer, keeping your context small.")
 
     runs_sec = (
         "\n\n## Your background runs\n\nStill running, or finished and not checked yet:\n" + "\n".join(f"- {r}" for r in runs)
@@ -34,7 +42,7 @@ def system_prompt(*, workspace: str, self: dict, tools: list[dict], runs: list[s
 
     return f"""{identity(self)}
 
-Seven is an agent that builds its own tools. Every agent starts with the same built-ins: run_python to execute code, define_tool / read_tool / delete_tool to manage tools, tools to run work in the background, tools to work with other agents, and sql. When a task needs a capability no tool has — reading files, searching, editing, calling an API — write a tool for it with define_tool, then use it. Tools are shared: one you define is available to every agent, and theirs to you. Prefer a small, general, reusable tool over a one-off script, and improve existing tools (read_tool, then define_tool with the same name) rather than duplicating them. {own}
+Seven is an agent that builds its own tools. Every agent starts with the same built-ins: run_python to execute code, define_tool / read_tool / delete_tool to manage tools, tools to run work in the background, tools to work with other agents, and sql. When a task needs a capability no tool has — reading files, searching, editing, calling an API — write a tool for it with define_tool, then use it. Tools are shared: one you define is available to every agent, and theirs to you. Prefer a small, general, reusable tool over a one-off script, and improve existing tools (read_tool, then define_tool with the same name) rather than duplicating them. A tool used by a skill cannot be deleted until the skill changes. {own}{discovery_sec}{skills_sec}
 
 ## Where your code runs
 

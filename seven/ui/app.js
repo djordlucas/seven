@@ -77,9 +77,192 @@ $$(".nav-btn").forEach((b) => (b.onclick = () => {
   if (state.view === "agents") loadAgents();
   if (state.view === "tools") loadTools();
   if (state.view === "runs") loadRuns();
+  if (state.view === "jobs") loadJobs();
+  if (state.view === "skills") loadSkills();
+  if (state.view === "memory") loadMemory();
   if (state.view === "logs") loadLogs();
   if (state.view === "config") loadConfig();
 }));
+
+$$(".chat-tabs .tab").forEach((b) => (b.onclick = () => {
+  $$(".chat-tabs .tab").forEach((x) => x.classList.toggle("active", x === b));
+  const tab = b.dataset.tab;
+  $("#messages").classList.toggle("hidden", tab !== "chat");
+  $("#send-form").classList.toggle("hidden", tab !== "chat");
+  $("#mail-pane").classList.toggle("hidden", tab === "chat");
+  if (tab !== "chat" && state.selectedAgent) loadMail(tab);
+}));
+
+async function loadMail(folder) {
+  const pane = $("#mail-pane");
+  try {
+    const rows = await api("GET", `/api/agents/${state.selectedAgent}/${folder}`);
+    pane.innerHTML = rows.length
+      ? rows.map((r) => {
+          if (folder === "inbox") return `<div class="mrow ${r.delivered_at ? "" : "pending"}">#${r.id} ${r.kind} from ${esc(r.sender)} ${r.delivered_at ? "(delivered)" : "(PENDING)"}\n${esc(r.text)}</div>`;
+          return `<div class="mrow ${r.delivered_at ? "" : "pending"}">#${r.id} to ${esc(r.recipient)} ${r.kind} ${r.delivered_at ? "(delivered)" : "(undelivered)"}\n${esc(r.text)}</div>`;
+        }).join("")
+      : `<div class="mrow">empty</div>`;
+  } catch (e) { pane.innerHTML = esc(String(e)); }
+}
+
+async function loadJobs() {
+  try {
+    state.jobs = await api("GET", "/api/jobs?all=" + ($("#jobs-all").checked ? "true" : "false"));
+    renderJobs();
+  } catch (e) { toast(String(e)); }
+}
+
+function renderJobs() {
+  const t = $("#jobs-table");
+  if (!state.jobs?.length) { t.innerHTML = `<tr><td class="kv">no jobs — start one from the UI, the API, or a message to the supervisor peer</td></tr>`; return; }
+  t.innerHTML = `<tr><th>job</th><th>kind</th><th>status</th><th>agent</th><th>turns</th><th>result / error</th></tr>` +
+    state.jobs.map((j) => `<tr class="clickable" data-id="${esc(j.id)}">
+      <td class="mono">${esc(j.id)}</td><td>${esc(j.kind)}</td><td>${badge(j.status)}</td>
+      <td class="mono">${esc(j.agent)}</td><td class="mono">${j.turns}</td>
+      <td class="kv">${esc((j.result || j.error || "").slice(0, 120))}</td></tr>`).join("");
+  $$("#jobs-table tr.clickable").forEach((tr) => (tr.onclick = () => selectJob(tr.dataset.id)));
+}
+
+async function selectJob(id) {
+  const j = await api("GET", `/api/jobs/${id}`);
+  const d = $("#job-detail");
+  d.classList.remove("hidden");
+  d.innerHTML = `
+    <h3 class="mono">${esc(j.id)} ${esc(j.kind)} ${badge(j.status)} — agent ${esc(j.agent)} (by ${esc(j.created_by)})</h3>
+    <div class="actions">
+      ${j.status === "running" ? `<button class="btn small" id="jd-pause">Pause</button><button class="btn small danger" id="jd-stop">Stop</button>` : ""}
+      ${j.status === "paused" ? `<button class="btn small" id="jd-resume">Resume</button><button class="btn small danger" id="jd-stop">Stop</button>` : ""}
+    </div>
+    <label>spec</label><pre>${esc(JSON.stringify(j.spec, null, 2))}</pre>
+    ${j.result ? `<label>result</label><pre>${esc(j.result.slice(0, 4000))}</pre>` : ""}
+    ${j.error ? `<label>error</label><pre>${esc(j.error.slice(0, 2000))}</pre>` : ""}`;
+  const stop = $("#jd-stop");
+  if (stop) stop.onclick = async () => { try { await api("POST", `/api/jobs/${id}/stop`, { reason: "stopped from UI" }); loadJobs(); selectJob(id); } catch (e) { toast(String(e)); } };
+  const pause = $("#jd-pause");
+  if (pause) pause.onclick = async () => { try { await api("POST", `/api/jobs/${id}/pause`); loadJobs(); selectJob(id); } catch (e) { toast(String(e)); } };
+  const resume = $("#jd-resume");
+  if (resume) resume.onclick = async () => { try { await api("POST", `/api/jobs/${id}/resume`); loadJobs(); selectJob(id); } catch (e) { toast(String(e)); } };
+}
+
+$("#btn-new-job").onclick = async () => {
+  const agents = await api("GET", "/api/agents?all=false");
+  const opts = agents.filter((a) => a.id !== "seven" && a.id !== "supervisor").map((a) => `<option value="${esc(a.id)}">${esc(a.id)} ${esc(a.name)}</option>`).join("");
+  modal("New job", `
+    <label>Kind</label><select id="j-kind"><option>task</option><option>goal</option><option>periodic</option></select>
+    <label>Task / goal text</label><textarea id="j-text" rows="3"></textarea>
+    <label>Instructions (optional)</label><input id="j-instr">
+    <label>interval_s (periodic only)</label><input id="j-interval" type="number">
+    <label>max_turns (goal only, default 20)</label><input id="j-maxturns" type="number">
+    <label>Agent (blank = spawn a dedicated worker; only sub-agents, never the root)</label><select id="j-agent"><option value="">— spawn worker —</option>${opts}</select>`,
+    [{ label: "Cancel", onClick: closeModal },
+     { label: "Start", primary: true, onClick: async () => {
+        try {
+          const kind = $("#j-kind").value;
+          const body = { kind, instructions: $("#j-instr").value, agent: $("#j-agent").value || null,
+            interval_s: $("#j-interval").value ? Number($("#j-interval").value) : null,
+            max_turns: $("#j-maxturns").value ? Number($("#j-maxturns").value) : 20 };
+          if (kind === "periodic") body.instructions = body.instructions || $("#j-text").value; else body[kind] = $("#j-text").value;
+          const j = await api("POST", "/api/jobs", body);
+          closeModal(); toast(`started ${j.id}`, true); loadJobs();
+        } catch (e) { toast(String(e)); }
+      } }]);
+};
+$("#jobs-all").onchange = loadJobs;
+
+async function loadSkills() {
+  try {
+    state.skills = await api("GET", "/api/skills");
+    renderSkills();
+  } catch (e) { toast(String(e)); }
+}
+
+function renderSkills() {
+  const t = $("#skills-table");
+  if (!state.skills?.length) { t.innerHTML = `<tr><td class="kv">no skills yet</td></tr>`; return; }
+  t.innerHTML = `<tr><th>name</th><th>description</th><th>tools</th><th>updated</th></tr>` +
+    state.skills.map((s) => `<tr class="clickable" data-name="${esc(s.name)}">
+      <td class="mono">${esc(s.name)}</td><td>${esc(s.description)}</td>
+      <td class="mono">${esc(s.tools.join(", ") || "—")}</td><td class="mono">${esc(s.updated_at)}</td></tr>`).join("");
+  $$("#skills-table tr.clickable").forEach((tr) => (tr.onclick = () => selectSkill(tr.dataset.name)));
+}
+
+async function selectSkill(name) {
+  const s = await api("GET", `/api/skills/${name}`);
+  const agents = await api("GET", "/api/agents?all=false");
+  const d = $("#skill-detail");
+  d.classList.remove("hidden");
+  const loadedBy = agents.filter((a) => (a.loaded_skills || []).includes(name)).map((a) => a.id).join(", ") || "none";
+  d.innerHTML = `
+    <h3 class="mono">${esc(s.name)}</h3>
+    <div class="kv">${esc(s.description)}</div>
+    <div class="actions">
+      <select id="sk-agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.id)} ${esc(a.name)}</option>`).join("")}</select>
+      <button class="btn small" id="sk-load">Load for agent</button>
+      <button class="btn small" id="sk-unload">Unload</button>
+      <button class="btn small danger" id="sk-delete">Delete skill</button>
+    </div>
+    <div class="kv">loaded by: ${esc(loadedBy)}</div>
+    <label>instructions</label><pre>${esc(s.instructions)}</pre>
+    <label>tools</label><pre>${esc(s.tools.join("\n") || "—")}</pre>`;
+  $("#sk-load").onclick = async () => { try { await api("POST", `/api/skills/${name}/load?agent=${$("#sk-agent").value}`); toast("loaded", true); selectSkill(name); loadAgents(); } catch (e) { toast(String(e)); } };
+  $("#sk-unload").onclick = async () => { try { await api("POST", `/api/skills/${name}/unload?agent=${$("#sk-agent").value}`); toast("unloaded", true); selectSkill(name); } catch (e) { toast(String(e)); } };
+  $("#sk-delete").onclick = async () => { if (!confirm(`Delete skill ${name}?`)) return; try { await api("DELETE", `/api/skills/${name}`); toast("deleted", true); d.classList.add("hidden"); loadSkills(); } catch (e) { toast(String(e)); } };
+}
+
+$("#btn-new-skill").onclick = async () => {
+  const tools = await api("GET", "/api/tools");
+  const checks = tools.map((t) => `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="sk-tool" value="${esc(t.name)}"> <span class="mono">${esc(t.name)}</span> — ${esc(t.description.slice(0, 60))}</label>`).join("");
+  modal("New / replace skill", `
+    <label>Name (snake_case)</label><input id="s-name">
+    <label>Description</label><input id="s-description">
+    <label>Instructions (apply while loaded)</label><textarea id="s-instructions" rows="4"></textarea>
+    <label>Tools (all must exist)</label><div style="max-height:30vh;overflow-y:auto">${checks || "no tools yet"}</div>`,
+    [{ label: "Cancel", onClick: closeModal },
+     { label: "Save", primary: true, onClick: async () => {
+        try {
+          const body = { name: $("#s-name").value.trim(), description: $("#s-description").value, instructions: $("#s-instructions").value,
+            tools: $$(".sk-tool").filter((c) => c.checked).map((c) => c.value) };
+          await api("POST", "/api/skills", body);
+          closeModal(); toast("saved", true); loadSkills();
+        } catch (e) { toast(String(e)); }
+      } }]);
+};
+
+async function loadMemory() {
+  try {
+    state.memory = await api("GET", "/api/memory");
+    renderMemory();
+  } catch (e) { toast(String(e)); }
+}
+
+function renderMemory() {
+  const t = $("#memory-table");
+  if (!state.memory?.length) { t.innerHTML = `<tr><td class="kv">nothing spilled yet — long tool/run output lands here</td></tr>`; return; }
+  t.innerHTML = `<tr><th>id</th><th>agent</th><th>tool/run</th><th>chars</th><th>lines</th></tr>` +
+    state.memory.map((o) => `<tr class="clickable" data-id="${esc(o.id)}">
+      <td class="mono">${esc(o.id)}</td><td class="mono">${esc(o.agent)}</td><td class="mono">${esc(o.tool)}</td>
+      <td class="mono">${o.chars}</td><td class="mono">${o.lines}</td></tr>`).join("");
+  $$("#memory-table tr.clickable").forEach((tr) => (tr.onclick = () => selectMemory(tr.dataset.id, 0)));
+}
+
+async function selectMemory(id, offset) {
+  const r = await api("GET", `/api/memory/${id}?offset=${offset}&limit=4000`);
+  const d = $("#memory-detail");
+  d.classList.remove("hidden");
+  d.innerHTML = `
+    <h3 class="mono">memory ${esc(id)} — ${r.total_chars} chars total</h3>
+    <div class="mem-nav">
+      <button class="btn small" id="m-prev" ${offset > 0 ? "" : "disabled"}>← prev</button>
+      <span class="kv">showing [${r.offset}, ${r.offset + r.chunk.length})</span>
+      <button class="btn small" id="m-next" ${r.next_offset != null ? "" : "disabled"}>next →</button>
+    </div>
+    <pre>${esc(r.chunk)}</pre>`;
+  const prev = $("#m-prev"); if (prev) prev.onclick = () => selectMemory(id, Math.max(0, offset - 4000));
+  const next = $("#m-next"); if (next) next.onclick = () => selectMemory(id, r.next_offset ?? offset);
+}
+
+$("#btn-refresh-memory").onclick = loadMemory;
 
 async function loadAgents() {
   try {
@@ -408,3 +591,7 @@ refreshHealth();
 loadAgents();
 state.agentsTimer = setInterval(() => { if (state.view === "agents") loadAgents(); refreshHealth(); }, 3000);
 state.runsTimer = setInterval(() => { if (state.view === "runs") loadRuns(); }, 2500);
+setInterval(() => { if (state.view === "jobs") loadJobs(); if (state.view === "skills") loadSkills(); if (state.view === "memory") loadMemory(); }, 3000);
+for (const t of ["spawned", "finished", "job_started", "job_updated", "job_finished", "skill_defined", "skill_deleted", "skill_loaded", "skill_unloaded"]) {
+  if (state.es) state.es.addEventListener(t, () => { loadAgents(); loadJobs(); loadSkills(); });
+}

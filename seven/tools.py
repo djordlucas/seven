@@ -18,7 +18,15 @@ from pathlib import Path
 from .state import State
 
 TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+SKILL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 KEEP_RUNS = 100
+
+
+class ToolInUseError(Exception):
+    def __init__(self, name: str, skills: list[str]):
+        self.name = name
+        self.skills = skills
+        super().__init__(f'tool "{name}" is used by skill(s) {", ".join(skills)} — change the skill first (define_skill without {name}) or delete_skill')
 
 
 def _meta_from_row(r) -> dict:
@@ -113,6 +121,9 @@ class ToolStore:
     def remove(self, name: str) -> bool:
         if not TOOL_NAME.match(name):
             return False
+        used = self.state.skills_using_tool(name)
+        if used:
+            raise ToolInUseError(name, used)
         cur = self.state._exec("DELETE FROM tools WHERE name = ?", (name,))
         self.state._exec("DELETE FROM tool_runs WHERE tool = ?", (name,))
         shutil.rmtree(self.dir / name, ignore_errors=True)

@@ -64,6 +64,23 @@ def agent_builtins() -> list:
             run=_wait_message,
         ),
         Builtin(
+            name="delegate",
+            description="Delegate a task to a sub-agent (R3c): spawns a request agent, waits for its final answer, "
+                        "returns only that answer, and stops the sub-agent. The sub-agent's conversation never enters "
+                        "your context — use this for long or independent sub-tasks. Times out after "
+                        "SEVEN_DELEGATE_TIMEOUT_S (default 600s).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "What the sub-agent should do and return."},
+                    "instructions": {"type": "string", "description": "Standing instructions for the sub-agent."},
+                    "name": {"type": "string", "description": "Optional name for the sub-agent."},
+                },
+                "required": ["task"],
+            },
+            run=_delegate,
+        ),
+        Builtin(
             name="stop_agent",
             description="Stop an agent and kill its background runs. Its parent is told. The root agent cannot be stopped.",
             parameters={"type": "object", "properties": {"agent": {"type": "string", "description": "An id or a name."}, "reason": {"type": "string"}}, "required": ["agent"]},
@@ -130,6 +147,30 @@ async def _stop_agent(a: dict, ctx: BuiltinContext) -> str:
         return f"error: {r}"
     out = ctx.supervisor.stop(r["id"], ctx.agent_id, None if a.get("reason") is None else str(a["reason"]))
     return out if out.startswith("stopped") else f"error: {out}"
+
+
+async def _delegate(a: dict, ctx: BuiltinContext) -> str:
+    import uuid
+    task = str(a.get("task", ""))
+    if not task.strip():
+        return "error: task is required"
+    name = str(a.get("name", "")) or f"delegate-{uuid.uuid4().hex[:6]}"
+    timeout_s = getattr(ctx.supervisor.opts, "delegate_timeout_s", 600)
+    row = ctx.supervisor.spawn(ctx.agent_id, {"name": name, "description": "delegated task",
+                                              "instructions": str(a.get("instructions", "")), "mode": "request",
+                                              "tasks": [task], "interval_s": None, "max_steps": None})
+    if isinstance(row, str):
+        return f"error: {row}"
+    msg = await ctx.supervisor.wait_message(ctx.agent_id, row["id"], timeout_s * 1000, ctx.abort)
+    ctx.supervisor.stop(row["id"], ctx.agent_id, "delegate finished")
+    if msg is None:
+        return f"error: delegate timed out after {timeout_s}s"
+    text = msg["text"]
+    if text.startswith("finished:"):
+        return text[len("finished:"):].strip() or "(no answer)"
+    if text.startswith(("failed:", "stopped:")):
+        return f"error: sub-agent {row['id']} {text}"
+    return text
 
 
 def _line(r: dict) -> str:

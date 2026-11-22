@@ -23,13 +23,14 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `GET /api/agents/{id}/messages?limit=&offset=` | The conversation transcript, oldest first. |
 | `POST /api/agents/{id}/messages` | Send `{"text"}` from the user. To the idle root agent it starts a turn at once (202 `{"turn_started": true}`); otherwise it queues an inbox message (202 `{"queued": n}`). 409 for terminal or unknown agents. |
 | `GET /api/agents/{id}/inbox` | Undelivered inbox items. |
+| `GET /api/agents/{id}/outbox` | What the peer has sent: recipient, kind, text, delivered. |
 | `POST /api/agents/{id}/stop` | Stop an agent (`{"reason"?}`); refused for the root. |
 | `POST /api/agents/{id}/compact` | Compact the conversation now; 409 when there is nothing to fold. |
 | `DELETE /api/agents/{id}/conversation` | Clear the conversation and summary. |
 | `GET /api/tools` | Generated tools with revision, state, run limit. |
 | `POST /api/tools` | Define one: `name`, `description`, `parameters`, `code`, optional `deps`, `test_args`, `timeout_ms`. Runs the trial first when `test_args` is set. 400 on a bad name, syntax error or failed trial. |
-| `GET /api/tools/{name}` | Definition and source. |
-| `DELETE /api/tools/{name}` | Delete it and its history. |
+| `GET /api/tools/{name}` | Definition and source, plus the skills using it. |
+| `DELETE /api/tools/{name}` | Delete it and its history; 409 naming the skills while one uses it. |
 | `POST /api/tools/{name}/disable` | `{"reason"}`; calls are refused while disabled. |
 | `POST /api/tools/{name}/enable` | Re-enable unchanged. |
 | `GET /api/tools/{name}/health?last=` | The `tool_health` report plus the raw run records. |
@@ -37,8 +38,21 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `POST /api/tools/{name}/start` | Run it in the background; 202 `{"run": "r3"}`. |
 | `POST /api/exec` | Run Python directly (`run_python`): `{"code", "args"?, "deps"?, "timeout_ms"?}` → the run result. |
 | `GET /api/runs?agent=&limit=` | Background runs, newest first. |
-| `GET /api/runs/{id}?tail=` | One run's summary line, result and output tail. |
+| `GET /api/runs/{id}?tail=` | One run's summary line, result and output tail (long output is spilled; the tail is kept). |
 | `POST /api/runs/{id}/kill` | Kill a live run; its result becomes `killed`. |
+| `GET /api/jobs?all=` | Jobs: id, kind, spec, agent, status, turns, result or error. Active ones unless `all`. |
+| `POST /api/jobs` | Start a job: `kind` (`task`/`goal`/`periodic`) plus `task`/`goal`/`interval_s`, optional `instructions`, `max_turns`, `agent`. 201, or 409 with the refusal. |
+| `GET /api/jobs/{jid}` | One job. |
+| `POST /api/jobs/{jid}/stop` | Stop it (`{"reason"?}`); 409 unless stopped. |
+| `POST /api/jobs/{jid}/pause`, `POST /api/jobs/{jid}/resume` | Pause / resume a job; 409 on a bad transition. |
+| `GET /api/skills` | All skills with description, instructions and tools. |
+| `POST /api/skills` | Define one: `name`, `description`, `tools` (must exist), optional `instructions`. 201, or 400 on a bad name or unknown tool. |
+| `GET /api/skills/{name}` | One skill. |
+| `DELETE /api/skills/{name}` | Delete it; every agent's loaded copy is unloaded. |
+| `POST /api/skills/{name}/load?agent=a1` | Load the skill for one agent: its tools join that agent's next tool list. |
+| `POST /api/skills/{name}/unload?agent=a1` | Unload it from one agent. |
+| `GET /api/memory` | Spilled outputs, newest first: id, agent, tool, path, chars, lines. |
+| `GET /api/memory/{oid}?offset=&limit=` | One spilled output as a character window: `chunk`, `total_chars`, `next_offset`. |
 | `GET /api/logs?agent=&turn=&run=&level=&grep=&tail=` | Structured log lines, filtered (`logging.md`). |
 | `GET /api/events?agent=` | SSE stream of agent events (below). |
 
@@ -56,6 +70,8 @@ one agent's events (plus messages to or from it). Event types:
 | `answer` | A turn ended with an answer: `{type, agent, text}`. |
 | `compacted` | The conversation was compacted: `{type, agent, folded, kept}`. |
 | `spawned` / `finished` | An agent was spawned / ended: `{type, agent, …}`. |
+| `job_started` / `job_updated` / `job_finished` | A job started, changed status, or ended: `{type, job, kind?, status, detail?}`. |
+| `skill_defined` / `skill_deleted` / `skill_loaded` / `skill_unloaded` | A skill changed: `{type, skill, tools?|agent?}`. |
 
 ```bash
 curl -N "http://127.0.0.1:8000/api/events?agent=seven"

@@ -152,6 +152,12 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
             raise _err(404, f'no agent "{agent_id}"')
         return seven.state.pending(agent_id)
 
+    @app.get("/api/agents/{agent_id}/outbox")
+    async def get_outbox(agent_id: str, limit: int = Query(100, ge=1, le=1000)):
+        if not seven.state.get_agent(agent_id):
+            raise _err(404, f'no agent "{agent_id}"')
+        return seven.state.list_outbox(agent_id, limit)
+
     @app.post("/api/agents/{agent_id}/stop")
     async def stop_agent(agent_id: str, req: StopRequest | None = None):
         out = seven.supervisor.stop(agent_id, "user", req.reason if req else None)
@@ -205,11 +211,16 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
         t = seven.store.get(name)
         if not t:
             raise _err(404, f'no tool named "{name}"')
-        return t
+        return {**t, "used_by_skills": seven.state.skills_using_tool(name)}
 
     @app.delete("/api/tools/{name}")
     async def delete_tool(name: str):
-        if not seven.store.remove(name):
+        from .tools import ToolInUseError
+        try:
+            removed = seven.store.remove(name)
+        except ToolInUseError as err:
+            raise _err(409, str(err))
+        if not removed:
             raise _err(404, f'no tool named "{name}"')
         return {"deleted": name}
 
@@ -286,6 +297,120 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
         live.kill()
         await seven.supervisor.runs.settled(rid)
         return {"killed": rid, "status": seven.state.get_run(rid)}
+
+    @app.get("/api/jobs")
+    async def list_jobs(all: bool = False):
+        return seven.state.list_jobs(all)
+
+    @app.post("/api/jobs", status_code=201)
+    async def start_job(req: dict | None = None):
+        body = req or {}
+        kind = str(body.get("kind", ""))
+        spec = {"task": body.get("task", ""), "goal": body.get("goal", ""),
+                "instructions": body.get("instructions", ""), "interval_s": body.get("interval_s"),
+                "max_turns": body.get("max_turns", 20)}
+        job = seven.supervisor.start_job("user", kind, spec, agent=body.get("agent"))
+        if isinstance(job, str):
+            raise _err(409, job)
+        return job
+
+    @app.get("/api/jobs/{jid}")
+    async def get_job(jid: str):
+        job = seven.state.get_job(jid)
+        if not job:
+            raise _err(404, f'no job "{jid}"')
+        return job
+
+    @app.post("/api/jobs/{jid}/stop")
+    async def stop_job(jid: str, req: StopRequest | None = None):
+        out = seven.supervisor.stop_job(jid, "user", req.reason if req else None)
+        if not out.startswith("stopped"):
+            raise _err(409, out)
+        return {"stopped": jid}
+
+    @app.post("/api/jobs/{jid}/pause")
+    async def pause_job(jid: str):
+        out = seven.supervisor.pause_job(jid)
+        if not out.startswith("paused"):
+            raise _err(409, out)
+        return {"paused": jid}
+
+    @app.post("/api/jobs/{jid}/resume")
+    async def resume_job(jid: str):
+        out = seven.supervisor.resume_job(jid)
+        if not out.startswith("running"):
+            raise _err(409, out)
+        return {"running": jid}
+
+    @app.get("/api/skills")
+    async def list_skills():
+        return seven.state.list_skills()
+
+    @app.post("/api/skills", status_code=201)
+    async def define_skill(req: dict | None = None):
+        from .tools import SKILL_NAME
+        body = req or {}
+        name = str(body.get("name", ""))
+        if not SKILL_NAME.match(name):
+            raise _err(400, f"name must match {SKILL_NAME.pattern}")
+        tools = body.get("tools") or []
+        missing = [t for t in tools if not seven.store.get(t)]
+        if missing:
+            raise _err(400, f"no such tool(s): {', '.join(missing)}")
+        return seven.state.save_skill(name=name, description=str(body.get("description", "")),
+                                      instructions=str(body.get("instructions", "")), tools=[str(t) for t in tools])
+
+    @app.get("/api/skills/{name}")
+    async def get_skill(name: str):
+        s = seven.state.get_skill(name)
+        if not s:
+            raise _err(404, f'no skill named "{name}"')
+        return s
+
+    @app.delete("/api/skills/{name}")
+    async def delete_skill(name: str):
+        if not seven.state.delete_skill(name):
+            raise _err(404, f'no skill named "{name}"')
+        seven.supervisor.emit({"type": "skill_deleted", "skill": name})
+        return {"deleted": name}
+
+    @app.post("/api/skills/{name}/load")
+    async def load_skill(name: str, agent: str = Query(..., description="agent id to load the skill for")):
+        if not seven.state.get_skill(name):
+            raise _err(404, f'no skill named "{name}"')
+        if not seven.state.get_agent(agent):
+            raise _err(404, f'no agent "{agent}"')
+        row = seven.state.get_agent(agent)
+        if name not in row["loaded_skills"]:
+            seven.state.set_loaded_skills(agent, [*row["loaded_skills"], name])
+        seven.supervisor.emit({"type": "skill_loaded", "skill": name, "agent": agent})
+        return {"loaded": name, "agent": agent}
+
+    @app.post("/api/skills/{name}/unload")
+    async def unload_skill(name: str, agent: str = Query(...)):
+        if not seven.state.get_agent(agent):
+            raise _err(404, f'no agent "{agent}"')
+        row = seven.state.get_agent(agent)
+        seven.state.set_loaded_skills(agent, [s for s in row["loaded_skills"] if s != name])
+        seven.supervisor.emit({"type": "skill_unloaded", "skill": name, "agent": agent})
+        return {"unloaded": name, "agent": agent}
+
+    @app.get("/api/memory")
+    async def list_memory():
+        return seven.state._all("SELECT * FROM outputs ORDER BY created_at DESC, id DESC LIMIT 200")
+
+    @app.get("/api/memory/{oid}")
+    async def read_memory(oid: str, offset: int = Query(0, ge=0), limit: int = Query(4000, ge=1, le=100000)):
+        out = seven.state.get_output(oid)
+        if not out:
+            raise _err(404, f'no memory "{oid}"')
+        from pathlib import Path
+        p = Path(out["path"])
+        if not p.is_file():
+            raise _err(404, f'memory "{oid}" file is missing')
+        text = p.read_text(encoding="utf-8", errors="replace")
+        window = text[offset:offset + limit]
+        return {"id": oid, "total_chars": len(text), "offset": offset, "next_offset": offset + len(window) if offset + len(window) < len(text) else None, "chunk": window}
 
     @app.get("/api/logs")
     async def logs(agent: str | None = None, turn: str | None = None, run: str | None = None,

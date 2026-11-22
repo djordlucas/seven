@@ -34,7 +34,9 @@ class SevenApp:
         self.supervisor = Supervisor(SupervisorOpts(
             state=self.state, store=self.store, runner=self.runner, model=self.model,
             workspace=str(cfg.workspace), max_steps=cfg.max_steps, context_tokens=cfg.context_tokens,
-            max_agents=cfg.max_agents, on_event=self._broadcast, log=self.log,
+            max_agents=cfg.max_agents, spill_chars=cfg.spill_chars, memory_dir=cfg.memory,
+            delegate_timeout_s=cfg.delegate_timeout_s, core_tools=cfg.core_tools,
+            tool_discovery=cfg.tool_discovery, on_event=self._broadcast, log=self.log,
         ))
         self._heartbeat: asyncio.Task | None = None
         self._lease_held = False

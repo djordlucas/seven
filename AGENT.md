@@ -82,10 +82,11 @@ section last, and no superseded content.
 
 ## Commit discipline
 
-**Always verify before committing: `make ci`.** It runs the tests (`pytest`),
-so the result does not depend on the machine. The suite scripts the model
-(`tests/fake_model.py`) and runs real child processes; nothing in it calls
-Mistral or the network. A change that does not pass is not ready to commit.
+**Always verify before committing: `make ci`.** It runs ruff, the tests
+(`pytest`) and the eval suite (`evals/run.py`), so the result does not depend
+on the machine. The suites script the model (`tests/fake_model.py`) and run
+real child processes; nothing in them calls Mistral or the network. A change
+that does not pass is not ready to commit.
 
 GitHub Actions is not set up for this repository; the local gate is the only
 gate.

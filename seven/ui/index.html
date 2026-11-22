@@ -14,6 +14,9 @@
     <button data-view="agents" class="nav-btn active">Agents</button>
     <button data-view="tools" class="nav-btn">Tools</button>
     <button data-view="runs" class="nav-btn">Runs</button>
+    <button data-view="jobs" class="nav-btn">Jobs</button>
+    <button data-view="skills" class="nav-btn">Skills</button>
+    <button data-view="memory" class="nav-btn">Memory</button>
     <button data-view="logs" class="nav-btn">Logs</button>
     <button data-view="config" class="nav-btn">Config</button>
   </nav>
@@ -35,6 +38,12 @@
           <div class="actions" id="chat-actions"></div>
         </div>
         <div id="chat-status" class="status-line"></div>
+        <div class="chat-tabs">
+          <button class="btn small tab active" data-tab="chat">Chat</button>
+          <button class="btn small tab" data-tab="inbox">Inbox</button>
+          <button class="btn small tab" data-tab="outbox">Outbox</button>
+        </div>
+        <div id="mail-pane" class="mail-pane hidden"></div>
         <div id="messages" class="messages"></div>
         <form id="send-form" class="send-form hidden">
           <textarea id="send-input" rows="2" placeholder="Message this agent… (Enter to send, Shift+Enter for newline)"></textarea>
@@ -60,6 +69,30 @@
     <div class="panel-head"><h2>Background runs</h2><button id="btn-refresh-runs" class="btn">Refresh</button></div>
     <table class="list" id="runs-table"></table>
     <div id="run-detail" class="detail hidden"></div>
+  </section>
+
+  <section id="view-jobs" class="view">
+    <div class="panel-head">
+      <h2>Jobs (supervisor-driven autonomous work)</h2>
+      <div><label><input type="checkbox" id="jobs-all"> show finished</label> <button id="btn-new-job" class="btn primary">+ New job</button></div>
+    </div>
+    <table class="list" id="jobs-table"></table>
+    <div id="job-detail" class="detail hidden"></div>
+  </section>
+
+  <section id="view-skills" class="view">
+    <div class="panel-head">
+      <h2>Skills (tool bundles)</h2>
+      <button id="btn-new-skill" class="btn primary">+ New skill</button>
+    </div>
+    <table class="list" id="skills-table"></table>
+    <div id="skill-detail" class="detail hidden"></div>
+  </section>
+
+  <section id="view-memory" class="view">
+    <div class="panel-head"><h2>Spilled output memory</h2><button id="btn-refresh-memory" class="btn">Refresh</button></div>
+    <table class="list" id="memory-table"></table>
+    <div id="memory-detail" class="detail hidden"></div>
   </section>
 
   <section id="view-logs" class="view">

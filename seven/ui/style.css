@@ -82,3 +82,10 @@ table.list tr.selected { background: #22304a; }
 .toast { position: fixed; bottom: 18px; right: 18px; background: var(--err); color: #fff; padding: 10px 14px; border-radius: 8px; max-width: 40vw; z-index: 30; font-size: 13px; white-space: pre-wrap; }
 .toast.ok { background: var(--ok); color: #0b0e13; }
 .kv { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.chat-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+.chat-tabs .tab.active { border-color: var(--accent); color: var(--accent); }
+.mail-pane { max-height: 62vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.mail-pane .mrow { padding: 3px 4px; border-bottom: 1px solid var(--border); }
+.mail-pane .pending { color: var(--warn); }
+.mem-nav { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.mem-nav input { width: 90px; background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
