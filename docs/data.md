@@ -15,6 +15,7 @@ workspace; seven's database is not open to them.
 | `.seven/site-packages` | pip packages runs import | The runner's installs |
 | `.seven/logs/seven.log`, `seven.log.1` | The structured log (`logging.md`) | Seven |
 | `.seven/tmp/` | Temporary files for `run_python` and trial runs, deleted after the run | The runner |
+| `.seven/memory/` (`SEVEN_MEMORY_DIR`) | Spilled tool/run output, one `<id>.out` file per spilled result | The agent loop and the run table |
 | anything else | The agents' files and databases | Agents and tools |
 
 ## State database
@@ -24,14 +25,18 @@ while the server process runs agents.
 
 | Table | One row per |
 |-------|-------------|
-| `agents` | Agent: id, name, description, instructions, parent, mode, status, interval, step limit, result, error, times; the summary of its compacted messages, where its context starts, and how often it was compacted |
+| `agents` | Peer: id, name, description, instructions, parent, mode (incl. `supervisor`), status, interval, step limit, result, error, times; the summary of its compacted messages, where its context starts, how often it was compacted, plus its loaded skills and revealed tools (JSON). The `supervisor` row is the supervisor peer |
 | `messages` | Message in an agent's conversation, in order, as sent to the model; compacted ones stay |
-| `inbox` | Task or message queued for an agent, with its sender and when it was delivered |
+| `inbox` | Task or message queued for a peer, with its sender and when it was delivered |
+| `outbox` | Sent item: sender, recipient, kind, text, when, and the inbox row it landed in |
+| `jobs` | Job: kind (`task`/`goal`/`periodic`), spec, agent, status (`running`/`paused`/`done`/`failed`/`stopped`), result or error, turns, queued flag, last turn, next run, creator, times |
+| `skills` | Skill: name, description, instructions, tools (JSON array) |
 | `tools` | Generated tool: definition, source, revision, run limit, disabled reason |
 | `tool_runs` | Finished run of a generated tool: revision, calling agent, sync or async, outcome, duration, first error line; the newest 100 per tool are kept |
-| `runs` | Background run: agent, tool, status, result, last 500 output lines |
+| `runs` | Background run: agent, tool, status, result, last 500 output lines (longer output is spilled to `.seven/memory/`) |
+| `outputs` | Spilled output: id (tool call id or run id), agent, tool, file path, chars, lines, when |
 | `lease` | The process running agents, and its last heartbeat |
-| `meta` | Schema version and the counters behind agent and run ids |
+| `meta` | Schema version and the counters behind agent, run and job ids |
 
 ## Agent and tool databases
 

@@ -146,8 +146,13 @@ async def _read_tool(a: dict, ctx: BuiltinContext) -> str:
 
 
 async def _delete_tool(a: dict, ctx: BuiltinContext) -> str:
+    from ..tools import ToolInUseError
     name = str(a.get("name", ""))
-    if not ctx.store.remove(name):
+    try:
+        removed = ctx.store.remove(name)
+    except ToolInUseError as err:
+        return f"error: {err}"
+    if not removed:
         return f'error: no tool named "{name}"'
     ctx.log.info("tool deleted", tool=name)
     return f"deleted {name}"

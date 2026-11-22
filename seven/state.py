@@ -105,7 +105,89 @@ CREATE TABLE IF NOT EXISTS lease (
 INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '1'), ('agent_seq', '0'), ('run_seq', '0');
 """
 
-SCHEMA_VERSION = 1
+MIGRATIONS = [
+    # 2: supervisor peer + per-agent loaded_skills/revealed_tools (agents rebuilt:
+    #    SQLite cannot ALTER a CHECK), plus jobs, outbox, skills, outputs.
+    """
+    CREATE TABLE IF NOT EXISTS jobs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('task', 'goal', 'periodic')),
+      spec TEXT NOT NULL,
+      agent TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('running', 'paused', 'done', 'failed', 'stopped')),
+      result TEXT,
+      error TEXT,
+      turns INTEGER NOT NULL DEFAULT 0,
+      queued INTEGER NOT NULL DEFAULT 0,
+      last_turn_at TEXT,
+      next_run_at TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS outbox (
+      id INTEGER PRIMARY KEY,
+      sender TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('task', 'message')),
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      inbox_id INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS outbox_sender ON outbox (sender, id);
+    CREATE TABLE IF NOT EXISTS skills (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL DEFAULT '',
+      instructions TEXT NOT NULL DEFAULT '',
+      tools TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS outputs (
+      id TEXT PRIMARY KEY,
+      agent TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      path TEXT NOT NULL,
+      chars INTEGER NOT NULL,
+      lines INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE agents_new (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      instructions TEXT NOT NULL DEFAULT '',
+      parent TEXT,
+      mode TEXT NOT NULL CHECK (mode IN ('interactive', 'request', 'sequence', 'continuous', 'supervisor')),
+      status TEXT NOT NULL CHECK (status IN ('running', 'idle', 'done', 'failed', 'stopped')),
+      interval_s INTEGER,
+      max_steps INTEGER,
+      result TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      finished_at TEXT,
+      last_turn_at TEXT,
+      summary TEXT,
+      context_from INTEGER NOT NULL DEFAULT 0,
+      compactions INTEGER NOT NULL DEFAULT 0,
+      loaded_skills TEXT NOT NULL DEFAULT '[]',
+      revealed_tools TEXT NOT NULL DEFAULT '[]'
+    );
+    INSERT INTO agents_new (id, name, description, instructions, parent, mode, status, interval_s, max_steps,
+                            result, error, created_at, updated_at, finished_at, last_turn_at, summary, context_from, compactions)
+      SELECT id, name, description, instructions, parent, mode, status, interval_s, max_steps,
+             result, error, created_at, updated_at, finished_at, last_turn_at, summary, context_from, compactions FROM agents;
+    DROP TABLE agents;
+    ALTER TABLE agents_new RENAME TO agents;
+    INSERT OR IGNORE INTO agents (id, name, description, parent, mode, status, created_at, updated_at)
+      VALUES ('supervisor', 'supervisor', 'The supervisor; message it to control jobs and read system status.', NULL, 'supervisor', 'idle', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT OR IGNORE INTO meta (key, value) VALUES ('job_seq', '0');
+    """,
+]
+
+SCHEMA_VERSION = len(MIGRATIONS) + 1
 
 
 def now_iso() -> str:
@@ -122,6 +204,8 @@ def _row_to_agent(r: sqlite3.Row) -> dict:
         "created_at": d["created_at"], "updated_at": d["updated_at"],
         "finished_at": d["finished_at"], "last_turn_at": d["last_turn_at"],
         "summary": d["summary"], "context_from": d["context_from"], "compactions": d["compactions"],
+        "loaded_skills": json.loads(d["loaded_skills"]) if d.get("loaded_skills") else [],
+        "revealed_tools": json.loads(d["revealed_tools"]) if d.get("revealed_tools") else [],
     }
 
 
@@ -149,6 +233,7 @@ class State:
         self.db = sqlite3.connect(self.path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode = WAL")
+        self.db.execute("PRAGMA synchronous = NORMAL")
         self.db.execute("PRAGMA busy_timeout = 5000")
         self.db.execute("PRAGMA foreign_keys = ON")
         self._lock = threading.RLock()
@@ -185,13 +270,21 @@ class State:
                 self._in_tx -= 1
 
     def _migrate(self) -> None:
+        row = self._one("SELECT value FROM meta WHERE key = 'schema_version'")
+        frm = int(row[0]) if row else 1
+        if frm > SCHEMA_VERSION:
+            raise RuntimeError(f"{self.path} is schema version {frm}; this seven knows up to {SCHEMA_VERSION}")
+        if frm < SCHEMA_VERSION:
+            # The agents rebuild drops and recreates the table; foreign keys must
+            # be off outside the transaction for that.
+            self.db.execute("PRAGMA foreign_keys = OFF")
+
         def work():
-            row = self.db.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-            frm = int(row[0]) if row else 1
-            if frm > SCHEMA_VERSION:
-                raise RuntimeError(f"{self.path} is schema version {frm}; this seven knows up to {SCHEMA_VERSION}")
+            for v in range(frm, SCHEMA_VERSION):
+                self.db.executescript(MIGRATIONS[v - 1])
             self.db.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),))
         self.tx(work)
+        self.db.execute("PRAGMA foreign_keys = ON")
 
     def _next(self, counter: str) -> int:
         with self._lock:
@@ -235,7 +328,7 @@ class State:
     def update_agent(self, agent_id: str, **fields) -> None:
         if not fields:
             return
-        cols = {"status", "interval_s", "max_steps", "result", "error", "finished_at", "last_turn_at", "summary", "context_from", "compactions", "description", "instructions", "name"}
+        cols = {"status", "interval_s", "max_steps", "result", "error", "finished_at", "last_turn_at", "summary", "context_from", "compactions", "description", "instructions", "name", "loaded_skills", "revealed_tools"}
         sets = []
         params = []
         for k, v in fields.items():
@@ -333,6 +426,126 @@ class State:
     def mark_lost_runs(self) -> int:
         cur = self._exec("UPDATE runs SET status = 'lost', error = 'lost: seven restarted while it ran' WHERE status = 'running'")
         return cur.rowcount
+
+    # ── mail (R2): inbox + outbox, written in one transaction ──
+
+    def send(self, sender: str, recipient: str, kind: str, text: str) -> int:
+        def work():
+            inbox_id = self.enqueue(recipient, sender=sender, kind=kind, text=text)
+            self.db.execute(
+                "INSERT INTO outbox (sender, recipient, kind, text, created_at, inbox_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (sender, recipient, kind, text, now_iso(), inbox_id),
+            )
+            return inbox_id
+        return self.tx(work)
+
+    def list_outbox(self, sender: str, limit: int = 100) -> list[dict]:
+        rows = self._all(
+            "SELECT o.id, o.sender, o.recipient, o.kind, o.text, o.created_at, i.delivered_at FROM outbox o"
+            " LEFT JOIN inbox i ON i.id = o.inbox_id WHERE o.sender = ? ORDER BY o.id DESC LIMIT ?",
+            (sender, limit),
+        )
+        return [dict(r) for r in rows]
+
+    # ── jobs (R1) ──
+
+    def create_job(self, *, kind: str, spec: dict, agent: str, created_by: str) -> dict:
+        jid = f"j{self._next('job_seq')}"
+        t = now_iso()
+        self._exec(
+            "INSERT INTO jobs (id, kind, spec, agent, status, turns, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, 'running', 0, ?, ?, ?)",
+            (jid, kind, json.dumps(spec), agent, created_by, t, t),
+        )
+        return self.get_job(jid)
+
+    def get_job(self, jid: str) -> dict | None:
+        r = self._one("SELECT * FROM jobs WHERE id = ?", (jid,))
+        return dict(r) | {"spec": json.loads(r["spec"])} if r else None
+
+    def list_jobs(self, all: bool = False) -> list[dict]:
+        rows = self._all("SELECT * FROM jobs ORDER BY created_at, id")
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["spec"] = json.loads(d["spec"])
+            out.append(d)
+        if not all:
+            out = [j for j in out if j["status"] in ("running", "paused")]
+        return out
+
+    def update_job(self, jid: str, **fields) -> None:
+        cols = {"status", "result", "error", "turns", "queued", "last_turn_at", "next_run_at", "finished_at", "agent"}
+        sets, params = [], []
+        for k, v in fields.items():
+            if k in cols:
+                sets.append(f"{k} = ?")
+                params.append(v)
+        if not sets:
+            return
+        sets.append("updated_at = ?")
+        params.append(now_iso())
+        params.append(jid)
+        self._exec(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", tuple(params))
+
+    # ── skills (R4) ──
+
+    def save_skill(self, *, name: str, description: str, instructions: str, tools: list[str]) -> dict:
+        t = now_iso()
+        self._exec(
+            "INSERT INTO skills (name, description, instructions, tools, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (name) DO UPDATE SET description = excluded.description, instructions = excluded.instructions,"
+            " tools = excluded.tools, updated_at = excluded.updated_at",
+            (name, description, instructions, json.dumps(tools), t, t),
+        )
+        return self.get_skill(name)
+
+    def get_skill(self, name: str) -> dict | None:
+        r = self._one("SELECT * FROM skills WHERE name = ?", (name,))
+        if not r:
+            return None
+        d = dict(r)
+        d["tools"] = json.loads(d["tools"])
+        return d
+
+    def list_skills(self) -> list[dict]:
+        return [self.get_skill(r["name"]) for r in self._all("SELECT name FROM skills ORDER BY name")]
+
+    def delete_skill(self, name: str) -> bool:
+        def work():
+            cur = self.db.execute("DELETE FROM skills WHERE name = ?", (name,))
+            if cur.rowcount == 0:
+                return False
+            for a in self.db.execute("SELECT id, loaded_skills FROM agents").fetchall():
+                loaded = json.loads(a["loaded_skills"] or "[]")
+                if name in loaded:
+                    self.db.execute("UPDATE agents SET loaded_skills = ?, updated_at = ? WHERE id = ?",
+                                    (json.dumps([s for s in loaded if s != name]), now_iso(), a["id"]))
+            return True
+        return self.tx(work)
+
+    def skills_using_tool(self, tool: str) -> list[str]:
+        rows = self._all("SELECT name FROM skills, json_each(skills.tools) WHERE json_each.value = ?", (tool,))
+        return [r["name"] for r in rows]
+
+    # ── per-agent revealed tools / loaded skills (R3b, R4) ──
+
+    def add_revealed_tool(self, agent_id: str, name: str) -> None:
+        a = self.get_agent(agent_id)
+        if a and name not in a["revealed_tools"]:
+            self.update_agent(agent_id, revealed_tools=json.dumps([*a["revealed_tools"], name]))
+
+    def set_loaded_skills(self, agent_id: str, names: list[str]) -> None:
+        self.update_agent(agent_id, loaded_skills=json.dumps(names))
+
+    # ── output memory (R3a) ──
+
+    def record_output(self, *, oid: str, agent: str, tool: str, path: str, chars: int, lines: int) -> None:
+        self._exec("INSERT OR REPLACE INTO outputs (id, agent, tool, path, chars, lines, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                   (oid, agent, tool, path, chars, lines, now_iso()))
+
+    def get_output(self, oid: str) -> dict | None:
+        r = self._one("SELECT * FROM outputs WHERE id = ?", (oid,))
+        return dict(r) if r else None
 
     def acquire_lease(self, stale_ms: int = LEASE_STALE_MS) -> str | None:
         def work():

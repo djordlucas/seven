@@ -11,6 +11,7 @@ import asyncio
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 
 from .log import Logger, noop_logger
 from .runner import RunHandle
@@ -20,10 +21,12 @@ KEEP_LOG_LINES = 500
 
 
 class RunTable:
-    def __init__(self, state: State, log: Logger = noop_logger):
+    def __init__(self, state: State, log: Logger = noop_logger, spill_chars: int = 2000, memory_dir: Path | None = None):
         self.state = state
         self.handles: dict[str, RunHandle] = {}
         self.closed = False
+        self.spill_chars = spill_chars
+        self.memory_dir = Path(memory_dir) if memory_dir else None
         self.log = log.child(component="runs")
 
     def add(self, agent: str, tool: str, handle: RunHandle) -> str:
@@ -39,8 +42,11 @@ class RunTable:
                               ok=r.ok, duration_ms=r.duration_ms)
             if not self.closed and self.state.is_open:
                 r = handle.done.result()
+                logs = r.logs[-KEEP_LOG_LINES:]
+                if self.spill_chars > 0 and self.memory_dir is not None and sum(len(l) for l in r.logs) > self.spill_chars:
+                    logs = self._spill(rid, agent, r)
                 self.state.finish_run(rid, {"ok": r.ok, "value": r.value, "error": r.error,
-                                             "logs": r.logs[-KEEP_LOG_LINES:], "duration_ms": r.duration_ms})
+                                             "logs": logs, "duration_ms": r.duration_ms})
 
         handle.done.add_done_callback(on_done)
         return rid
@@ -79,6 +85,16 @@ class RunTable:
 
     def mark_checked(self, rid: str) -> None:
         self.state.mark_run_checked(rid)
+
+    def _spill(self, rid: str, agent: str, r) -> list[str]:
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+        path = self.memory_dir / f"{rid}.out"
+        text = "\n".join(r.logs)
+        path.write_text(text, encoding="utf-8")
+        self.state.record_output(oid=rid, agent=agent, tool=rid, path=str(path), chars=len(text), lines=len(r.logs))
+        ref = (f"[full output spilled to memory {rid} ({len(text)} chars, {len(r.logs)} lines); "
+               f'read chunks with read_memory("{rid}", from, to)]')
+        return [ref, *r.logs[-50:]]
 
 
 def _seconds(ms: float) -> str:

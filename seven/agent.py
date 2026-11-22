@@ -42,6 +42,10 @@ class AgentDeps:
     workspace: str
     max_steps: int
     context_tokens: int
+    spill_chars: int = 2000
+    memory_dir: object = None
+    core_tools: tuple = ()
+    tool_discovery: bool = True
     log: Logger = noop_logger
     on_event: object = None
 
@@ -125,7 +129,10 @@ class Agent:
                     self.emit({"type": "answer", "agent": self.id, "text": answer})
                     return answer
                 for call in message["tool_calls"]:
-                    result = _truncate(await self.dispatch(call, step_log))
+                    result = await self.dispatch(call, step_log)
+                    if self.deps.spill_chars > 0 and len(result) > self.deps.spill_chars:
+                        result = self._spill(call["id"], call["function"]["name"], result)
+                    result = _truncate(result)
                     self.append({"role": "tool", "tool_call_id": call["id"], "name": call["function"]["name"], "content": result})
             stopped = f"Stopped after {max_steps} steps without a final answer."
             log.warning("turn finished", outcome="max_steps", steps=steps, duration_ms=round((time.time() - started) * 1000))
@@ -221,16 +228,42 @@ class Agent:
             state.tx(work)
             log.info("message delivered", sender=m["sender"], inbox_id=m["id"], chars=len(m["text"]))
 
+    def _spill(self, call_id: str, tool: str, result: str) -> str:
+        from pathlib import Path
+        mem = Path(self.deps.memory_dir) if self.deps.memory_dir else Path(self.deps.workspace) / ".seven" / "memory"
+        mem.mkdir(parents=True, exist_ok=True)
+        path = mem / f"{call_id}.out"
+        path.write_text(result, encoding="utf-8")
+        lines = result.count("\n") + 1
+        self.deps.state.record_output(oid=call_id, agent=self.id, tool=tool, path=str(path), chars=len(result), lines=lines)
+        self.deps.log.info("output spilled to memory", agent=self.id, tool=tool, call=call_id, chars=len(result), lines=lines)
+        return (f'[output saved to memory {call_id} ({len(result)} chars, {lines} lines); '
+                f'read it in chunks with read_memory("{call_id}", from, to)]')
+
     def context(self) -> tuple[list[ToolDef], dict]:
         store = self.deps.store
+        state = self.deps.state
         own = store.list()
         bl = builtins()
-        tools = [ToolDef(name=b.name, description=b.description, parameters=b.parameters) for b in bl.values()]
-        tools += [ToolDef(name=t["name"], description=t["description"], parameters=t["parameters"]) for t in own if not t.get("disabled")]
+        row = self.row()
+        if self.deps.tool_discovery:
+            from .builtins.discovery import META_TOOLS
+            names = set(self.deps.core_tools) | set(META_TOOLS) | set(row["revealed_tools"])
+            for s in row["loaded_skills"]:
+                sk = state.get_skill(s)
+                if sk:
+                    names.update(sk["tools"])
+            tools = [ToolDef(name=b.name, description=b.description, parameters=b.parameters) for n in names if (b := bl.get(n))]
+            tools += [ToolDef(name=t["name"], description=t["description"], parameters=t["parameters"]) for t in own if t["name"] in names and not t.get("disabled")]
+        else:
+            tools = [ToolDef(name=b.name, description=b.description, parameters=b.parameters) for b in bl.values()]
+            tools += [ToolDef(name=t["name"], description=t["description"], parameters=t["parameters"]) for t in own if not t.get("disabled")]
         my_runs = [summarize(r, self.deps.runs.handle(r["id"])) for r in self.deps.runs.list(self.id)
                    if r["status"] == "running" or not r["checked"]]
-        content = system_prompt(workspace=self.deps.workspace, self=self.row(), tools=own, runs=my_runs,
-                                agents=[a for a in self.deps.supervisor.list(False) if a["id"] != self.id])
+        skills = state.list_skills()
+        content = system_prompt(workspace=self.deps.workspace, self=row, tools=own, runs=my_runs,
+                                agents=[a for a in self.deps.supervisor.list(False) if a["id"] != self.id],
+                                skills=skills, loaded_skills=set(row["loaded_skills"]))
         return tools, {"role": "system", "content": content}
 
     async def dispatch(self, call: dict, step_log: Logger) -> str:

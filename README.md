@@ -53,7 +53,10 @@ With Docker: `docker compose up` serves on port 8000, with agents working in
 |------|------------|-----|
 | API + UI | One FastAPI app (`seven serve`): REST at `/api/…`, live events over SSE at `/api/events`, the companion UI at `/` | [docs/api.md](docs/api.md), [docs/ui.md](docs/ui.md) |
 | Agent loop | Model call → tool calls → results, repeated until the model answers; the tool list is re-read every step | [docs/architecture.md](docs/architecture.md) |
-| Agents | Any number at once: request, sequence or continuous agents, spawned by any agent, found with `find_agents`, talked to with `send_message` / `wait_message` | [docs/agents.md](docs/agents.md) |
+| Agents | Any number at once: request, sequence or continuous agents, spawned by any agent, found with `find_agents`, talked to with `send_message` / `wait_message`; every peer (agents and the supervisor) has a persisted inbox and outbox | [docs/agents.md](docs/agents.md) |
+| Jobs | Persisted autonomous work the supervisor drives on an agent — until a task is done, until a goal is attained, or periodically — controlled via API, UI, messages or built-ins; they survive restarts | [docs/agents.md](docs/agents.md#jobs) |
+| Context efficiency | Long tool output spills to `.seven/memory/` and is read back in chunks; the tool list sent each step is small behind `list_tools` / `describe_tool` discovery and skills; `delegate` runs sub-tasks on throwaway agents and returns only the answer | [docs/architecture.md](docs/architecture.md#output-memory-and-tool-discovery) |
+| Skills | Named bundles of generated tools plus instructions; a tool used by a skill cannot be deleted until the skill changes; full CRUD from the API/UI and the model's built-ins | [docs/agents.md](docs/agents.md#skills) |
 | Generated tools | Python modules any agent writes with `define_tool`, shared by all agents | [docs/architecture.md](docs/architecture.md#generated-tools) |
 | Runner | One Python child process per run, killed with everything it spawned when the result is back; pip packages installed on demand; `seven.llm.chat` for calling the model | [docs/runner.md](docs/runner.md) |
 | Logging | Structured JSON lines from every component, traced by agent, turn, step and run; `seven logs` and `/api/logs` filter them | [docs/logging.md](docs/logging.md) |
@@ -66,7 +69,8 @@ With Docker: `docker compose up` serves on port 8000, with agents working in
 ```bash
 make install     # pip install -e ".[dev]"
 make test        # pytest (no network, no API key: the model is scripted)
-make ci          # the gate before committing: pytest
+make eval        # evals/run.py: 8 end-to-end feature checks against a scripted model
+make ci          # the gate before committing: ruff + pytest + evals
 make serve       # seven serve on 127.0.0.1:8000
 ```
 
@@ -80,8 +84,9 @@ against a scripted model; nothing has been tuned against real sessions yet.
 
 ## Roadmap
 
-- An eval set of tasks that require building tools, to measure what the agent
-  builds and reuses.
+- Eval tasks that require building tools, to measure what the agent builds
+  and reuses (the feature eval suite itself lives in `evals/run.py`,
+  `make eval`).
 - Streaming model replies into the UI.
 
 ## Limits

@@ -40,6 +40,11 @@ class Config:
     log_level: str
     log_file: Path | None
     log_stderr: bool | None
+    spill_chars: int
+    memory_dir: Path
+    core_tools: tuple[str, ...]
+    tool_discovery: bool
+    delegate_timeout_s: int
     extra: dict = field(default_factory=dict)
 
     @property
@@ -62,6 +67,10 @@ class Config:
     def site_packages(self) -> Path:
         return self.home / "site-packages"
 
+    @property
+    def memory(self) -> Path:
+        return self.workspace / self.memory_dir if not self.memory_dir.is_absolute() else self.memory_dir
+
     def public(self) -> dict:
         return {
             "model": self.model,
@@ -78,6 +87,11 @@ class Config:
             "log_file": str(self.log_file) if self.log_file else None,
             "log_stderr": self.log_stderr,
             "api_key_set": bool(self.api_key),
+            "spill_chars": self.spill_chars,
+            "memory_dir": str(self.memory_dir),
+            "core_tools": list(self.core_tools),
+            "tool_discovery": self.tool_discovery,
+            "delegate_timeout_s": self.delegate_timeout_s,
         }
 
 
@@ -116,4 +130,11 @@ def load_config(env: dict | None = None) -> Config:
         log_level=parse_level(env.get("SEVEN_LOG_LEVEL"), "info"),
         log_file=log_file,
         log_stderr=None if stderr_env is None else stderr_env == "1",
+        spill_chars=_int(env.get("SEVEN_SPILL_CHARS"), 2000),
+        memory_dir=Path(env.get("SEVEN_MEMORY_DIR") or ".seven/memory"),
+        core_tools=tuple(
+            (env.get("SEVEN_CORE_TOOLS") or "run_python,define_tool,read_tool,delegate,send_message,wait_message,spawn_agent,read_memory").split(",")
+        ),
+        tool_discovery=env.get("SEVEN_TOOL_DISCOVERY", "1") != "0",
+        delegate_timeout_s=_int(env.get("SEVEN_DELEGATE_TIMEOUT_S"), 600),
     )

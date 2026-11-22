@@ -155,3 +155,46 @@ async def test_events_sse_route_and_bus(api):
     types = {e["type"] for e in seen}
     assert "message" in types and "answer" in types
     assert all(e.get("agent") == "seven" for e in seen)
+
+
+async def test_mail_jobs_skills_memory_endpoints(api):
+    c = api.client
+    r = await c.post("/api/agents/seven/messages", json={"text": "note to self"})
+    assert r.status_code == 202
+    r = await c.get("/api/agents/seven/inbox")
+    assert r.status_code == 200
+    r = await c.get("/api/agents/seven/outbox")
+    assert r.status_code == 200 and isinstance(r.json(), list)
+    r = await c.post("/api/agents/supervisor/messages", json={"text": "status"})
+    assert r.status_code == 202 and "queued" in r.json()
+    assert await until(lambda: c.get("/api/agents/supervisor/inbox").json() if False else api.seven.state.pending("supervisor") == [])
+    r = await c.get("/api/agents/supervisor/outbox")
+    assert r.status_code == 200
+    r = await c.post("/api/agents/supervisor/stop", json={})
+    assert r.status_code == 409
+    r = await c.get("/api/jobs")
+    assert r.status_code == 200 and r.json() == []
+    r = await c.post("/api/jobs", json={"kind": "task", "task": "t"})
+    assert r.status_code == 201
+    jid = r.json()["id"]
+    r = await c.post(f"/api/jobs/{jid}/stop", json={"reason": "test"})
+    assert r.status_code == 200
+    r = await c.post("/api/jobs", json={"kind": "task", "task": "t", "agent": "seven"})
+    assert r.status_code == 409 and "never a job target" in r.json()["detail"]
+    r = await c.post("/api/tools", json={"name": "adder", "description": "d", "code": "def default(a):\n    return a['x'] + 1"})
+    assert r.status_code == 201
+    r = await c.post("/api/skills", json={"name": "math", "description": "m", "tools": ["adder"]})
+    assert r.status_code == 201
+    r = await c.post("/api/skills", json={"name": "bad", "description": "m", "tools": ["nope"]})
+    assert r.status_code == 400
+    r = await c.delete("/api/tools/adder")
+    assert r.status_code == 409 and "used by skill(s) math" in r.json()["detail"]
+    r = await c.post("/api/skills/math/load", params={"agent": "seven"})
+    assert r.status_code == 200
+    assert "math" in api.seven.state.get_agent("seven")["loaded_skills"]
+    r = await c.get("/api/tools/adder")
+    assert r.json()["used_by_skills"] == ["math"]
+    r = await c.post("/api/exec", json={"code": "default = lambda a: 'y' * 3000"})
+    assert r.json()["ok"]
+    r = await c.get("/api/memory")
+    assert r.status_code == 200

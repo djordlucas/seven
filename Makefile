@@ -1,4 +1,4 @@
-.PHONY: install test ci serve clean
+.PHONY: install test eval lint ci serve clean
 
 install:
 	pip install -e ".[dev]"
@@ -6,7 +6,13 @@ install:
 test:
 	python -m pytest tests/ -q
 
-ci: test
+eval:
+	python evals/run.py
+
+lint:
+	python -m ruff check seven tests evals
+
+ci: lint test eval
 
 serve:
 	seven serve --host 127.0.0.1 --port 8000

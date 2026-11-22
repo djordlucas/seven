@@ -4,9 +4,13 @@ Seven is a single Python process — a FastAPI app — running any number of
 agents concurrently: a supervisor drives each agent's loop, every agent calls
 the Mistral API through one shared client, and every piece of code an agent
 writes runs in its own child process. All state — agents, conversations,
-inboxes, generated tools and their history — is one SQLite database in the
-workspace. Agents start with 20 built-in tools and grow by writing generated
-tools, which every agent can call from its next step onward.
+inboxes and outboxes, jobs, skills, generated tools and their history — is
+one SQLite database in the workspace. Agents start with 35 built-in tools
+and grow by writing generated tools, which every agent can call from its
+next step onward. Long tool output is spilled to files and read back in
+chunks, the tool list sent to the model stays small behind discovery and
+skills, every peer can exchange mail, and agents and the supervisor can run
+persisted autonomous jobs.
 
 ```text
               ┌──────────────── seven process (FastAPI) ────────────────┐
@@ -30,10 +34,10 @@ tools, which every agent can call from its next step onward.
 |-----------|----------------|
 | API | FastAPI app (`seven/api.py`): REST under `/api/…`, SSE at `/api/events`, the UI at `/`. Every route is `async def` so it shares the event loop with the agents. |
 | CLI | `seven serve` wires everything and holds the lease; `seven agents`, `seven send`, `seven tools` and `seven logs` read the state database or the log without running agents, so they work while a server runs. |
-| Supervisor | Runs every agent's loop concurrently: resumes unfinished agents at start, starts a turn for each idle agent with work in its inbox (polled every 250 ms), ends request and sequence agents when their tasks are done, and tells parents when children end (`agents.md`). The root agent is driven by the user, through the API. |
-| Agent loop | One per agent. Sends the agent's conversation and the current tool list to the model, runs every tool call in the reply, appends the results, and repeats until a reply has no tool calls or the step budget runs out. Every message is written to the state database as it is produced. Compacts the conversation into a summary when it nears the context window (`compaction.md`). |
+| Supervisor | Runs every agent's loop concurrently: resumes unfinished agents at start, starts a turn for each idle agent with work in its inbox (polled every 250 ms), ends request and sequence agents when their tasks are done, and tells parents when children end (`agents.md`). It also drives persisted jobs (task, goal, periodic) on their agents. The root agent is driven by the user, through the API. The supervisor itself is a peer (`supervisor`) with its own inbox, outbox and command language. |
+| Agent loop | One per agent. Sends the agent's conversation and the current tool list to the model, runs every tool call in the reply, appends the results, and repeats until a reply has no tool calls or the step budget runs out. Every message is written to the state database as it is produced, and results over `SEVEN_SPILL_CHARS` are spilled to memory instead. Compacts the conversation into a summary when it nears the context window (`compaction.md`). |
 | Model client | One non-streamed Mistral chat completion per step, with function tools. Retries 429 and 5xx responses with backoff, honouring `retry-after`. Shared by all agents, with at most `SEVEN_LLM_CONCURRENCY` calls in flight. |
-| State database | `<workspace>/.seven/seven.db`: agents, conversations, inboxes, tools, tool runs, background runs, the lease (`data.md`). |
+| State database | `<workspace>/.seven/seven.db`: agents, conversations, inboxes and outboxes, jobs, skills, tools, tool runs, background runs, spilled outputs, the lease (`data.md`). |
 | Tool store | Generated tools, as rows in the state database; each revision's source is also written to `.seven/tools/<name>/r<revision>.py` for the runner to import. |
 | Runner | Installs the pip packages source imports and runs it in a fresh Python child process per run (`runner.md`). |
 | Logger | Structured JSON lines from every component, bound to the agent, turn, step, call and run they belong to (`logging.md`). |
@@ -45,9 +49,13 @@ tools, which every agent can call from its next step onward.
 2. Messages that arrived in the agent's inbox since the last step are appended.
 3. The system prompt is rebuilt: who the agent is (its mode, parent and
    instructions), the generated tools, its background runs that are going or
-   unchecked, the other active agents, and the summary of compacted messages.
-   The tool list is the built-ins plus every enabled generated tool, read on
-   every step.
+   unchecked, the other active agents, its skills, and the summary of
+   compacted messages. The tool list sent is kept small: the core tools
+   (`SEVEN_CORE_TOOLS`), the discovery and skill meta tools
+   (`list_tools`, `describe_tool`, `list_skills`, `load_skill`,
+   `unload_skill`), the tools revealed earlier with `describe_tool`, and the
+   tools of loaded skills — rebuilt on every step. With `SEVEN_TOOL_DISCOVERY=0`
+   every built-in and every enabled generated tool is sent every step instead.
 4. When the request is estimated above 75% of the context window, the older
    messages are compacted into the summary first (`compaction.md`).
 5. The model replies. A reply without tool calls is the answer and ends the turn.
@@ -55,8 +63,11 @@ tools, which every agent can call from its next step onward.
    use the runner; a generated tool runs its source in a child process with the
    call's arguments. An unknown tool or invalid arguments produce an `error: …`
    result for the model, never an exception.
-7. Each result is cut to 16,000 characters and appended as a `tool` message.
-   The loop returns to step 2.
+7. A result longer than `SEVEN_SPILL_CHARS` (default 2,000) is spilled to
+   `<memory dir>/<call id>.out`, recorded in the `outputs` table, and replaced
+   by a reference telling the model to read it in chunks with `read_memory`;
+   anything still longer than 16,000 characters is cut, and appended as a
+   `tool` message. The loop returns to step 2.
 
 A turn that reaches its step limit (`max_steps`, default `SEVEN_MAX_STEPS`)
 ends with `Stopped after N steps without a final answer.`
@@ -77,13 +88,18 @@ ends with `Stopped after N steps without a final answer.`
 | `wait_run` | Waits for a background run to finish, up to `timeout_ms` (default 30 s, at most 300 s), then shows its status. Waiting does not stop the run. |
 | `kill_run` | Kills a background run and its process group; the run fails with `killed`. |
 | `list_runs` | Lists the calling agent's background runs, one line each. |
-| `spawn_agent`, `list_agents`, `find_agents`, `agent_status`, `send_message`, `wait_message`, `stop_agent` | Working with other agents (`agents.md`). |
+| `spawn_agent`, `list_agents`, `find_agents`, `agent_status`, `send_message`, `wait_message`, `stop_agent`, `delegate` | Working with other agents (`agents.md`); `delegate` runs one task on a throwaway request agent and returns only its answer. |
+| `list_inbox`, `list_outbox` | Read the caller's inbox (pending, then delivered) and outbox (what was sent, to whom, delivered or not). |
+| `start_job`, `stop_job`, `list_jobs` | Jobs: autonomous work the supervisor drives (`agents.md#jobs`). |
+| `define_skill`, `read_skill`, `list_skills`, `delete_skill`, `load_skill`, `unload_skill` | Skills: named bundles of generated tools plus instructions; loading one makes its tools callable (`agents.md#skills). |
+| `list_tools`, `describe_tool` | Tool discovery: list everything that exists; reveal one tool's schema, persistently, so it is callable from the next step. |
+| `read_memory` | Read a character window of spilled output (`SEVEN_MEMORY_DIR`), with total size and next offset. |
 | `sql` | Runs SQL on a SQLite database file in the workspace (`data.md`). |
 
 The built-ins are deliberately limited to running code, managing generated
-tools, controlling background runs, working with other agents, and SQL.
-Reading files, searching or editing are capabilities the agents write for
-themselves.
+tools, controlling background runs, working with other agents, jobs, mail,
+skills, memory, discovery, and SQL. Reading files, searching or editing are
+capabilities the agents write for themselves.
 
 ## Sync and async calls
 
@@ -130,6 +146,68 @@ Redefining the tool clears `disabled`, because the new revision is the fix.
 A tool's `timeout_ms` replaces the default run limit (`SEVEN_RUN_TIMEOUT_MS`)
 for every run of that tool; `start_tool`'s own `timeout_ms` overrides both.
 
+## Jobs
+
+A job is persisted autonomous work the supervisor drives on an agent —
+until a task is done, until a goal is attained, or periodically:
+
+| Kind | Runs until | Spec |
+|------|-----------|------|
+| `task` | The agent's turn ends | `task`, optional `instructions` |
+| `goal` | A supervisor-side model check after each turn answers YES, or `max_turns` (default 20) turns pass | `goal`, optional `instructions`, `max_turns` |
+| `periodic` | Stopped; wakes the agent every `interval_s` | `interval_s`, optional `instructions` |
+
+Jobs are created through the API, the UI, a message to the supervisor
+(`start job task on a1 …`, `stop j1`, `pause j1`, `resume j1`, `jobs`,
+`agents`, `status`), or the `start_job` built-in — which may only attach a
+job to the calling agent itself or to a freshly spawned worker; assigning a
+job to another agent is the supervisor's job. A job without an agent gets a
+dedicated continuous worker, stopped when the job ends. The root and the
+supervisor are never job targets, a periodic job needs a continuous agent,
+and jobs survive restarts: the lease-holding process re-drives every
+running or paused job (`agents.md#jobs`).
+
+## Mail
+
+Every message peer — the supervisor and every agent — has a persisted inbox
+and outbox. Sending writes both sides in one transaction: the recipient's
+inbox row and the sender's outbox row. `list_inbox` and `list_outbox` read
+them; the API exposes them per agent, and the UI shows both as chat tabs.
+Replies the supervisor sends to an agent's command arrive as ordinary
+messages; messages from the user have no inbox to reply into, so they are
+answered on the supervisor's outbox only.
+
+## Output memory and tool discovery
+
+Two measures keep context use low:
+
+- Tool and run results longer than `SEVEN_SPILL_CHARS` never enter the
+  conversation whole: they are written to `<memory dir>/<id>.out`
+  (default `.seven/memory/`), recorded in the `outputs` table, and the agent
+  gets a reference; `read_memory(id, offset, limit)` pages through the file,
+  and `/api/memory` shows the same for the UI.
+- With tool discovery on (default), each step sends only the core tools, the
+  meta tools, previously revealed tools and loaded-skill tools.
+  `list_tools` shows everything that exists; `describe_tool` reveals one,
+  persisted per agent in `revealed_tools`. `SEVEN_TOOL_DISCOVERY=0` restores
+  sending every schema every step.
+
+`delegate` is the third measure: it spawns a request agent for an independent
+sub-task, waits up to `SEVEN_DELEGATE_TIMEOUT_S` for its final answer, and
+returns only that answer — the sub-agent's conversation never enters the
+parent's context.
+
+## Skills
+
+A skill is a named bundle of generated tools plus a description and standing
+instructions. `define_skill` refuses tool names that do not exist, and a tool
+used by a skill cannot be deleted (`delete_tool` and `DELETE /api/tools/…`
+refuse with the skill names) until the skill is changed or deleted. Loading
+a skill (`load_skill`, or `POST /api/skills/{name}/load?agent=a1`) makes its
+tools callable from that agent's next step and adds its instructions to the
+system prompt; the load is persisted per agent. Skills get full CRUD from
+the user (API and UI) and from the model (built-ins).
+
 ## Configuration
 
 All configuration comes from environment variables. A `.env` file in the
@@ -149,6 +227,11 @@ already set in the environment; `compose.yaml` passes `.env` through
 | `SEVEN_RUN_MEMORY_MB` | `1024` | Address-space cap of one run, in MiB (RLIMIT_AS in the child). |
 | `SEVEN_MAX_AGENTS` | `16` | Agents besides the root that may be active at once. |
 | `SEVEN_LLM_CONCURRENCY` | `4` | Model calls in flight at once, across all agents. |
+| `SEVEN_SPILL_CHARS` | `2000` | Tool results longer than this are spilled to memory instead of entering the conversation. `0` disables spilling. |
+| `SEVEN_MEMORY_DIR` | `.seven/memory` | Where spilled output files live; relative paths resolve against the workspace. |
+| `SEVEN_CORE_TOOLS` | `run_python,define_tool,read_tool,delegate,send_message,wait_message,spawn_agent,read_memory` | Comma-separated tools always in the tool list when discovery is on. |
+| `SEVEN_TOOL_DISCOVERY` | `1` | `0` sends every tool schema on every step. |
+| `SEVEN_DELEGATE_TIMEOUT_S` | `600` | How long `delegate` waits for the sub-agent's answer. |
 | `SEVEN_LOG_LEVEL`, `SEVEN_LOG_FILE`, `SEVEN_LOG_STDERR` | `info`, `.seven/logs/seven.log`, on for `serve` | Logging (`logging.md`). |
 
 ## Limits
@@ -160,4 +243,8 @@ already set in the environment; `compose.yaml` passes `.env` through
 | Sequential tool calls | Tool calls in one reply run one after another; `start_tool` and other agents are how work overlaps. |
 | No automatic disabling | Seven does not disable a tool on its own, however often it fails; agents decide from `tool_health`. |
 | No push notification | An agent learns that a background run finished from the system prompt at its next step, or by asking; nothing interrupts a step in progress. |
+| Goal judgement is model-based | The per-turn YES/NO check is another model call, with its own cost and fallibility. |
+| Spill threshold is per result | A result just over `SEVEN_SPILL_CHARS` spills whole; the agent then pays one `read_memory` call per chunk it needs. |
+| Discovery costs a step | The model must call `list_tools`/`describe_tool` before using a non-core tool. |
+| User commands are not mailed back | The supervisor answers commands from agents as messages, but the user has no inbox row; user-sent commands are answered on the supervisor's outbox only. |
 | No self-modification of seven's own source | Agents extend seven through generated tools only; they do not edit the `seven/` package. |
