@@ -12,14 +12,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__
-from .app import SevenApp
-from .builtins.code import _health
-from .builtins.shared import BuiltinContext, await_run, format_run, start_generated
-from .config import load_config
-from .log import read_log
-from .runs import describe
-from .state import ROOT_ID, TERMINAL
+from .. import __version__
+from ..app import SevenApp
+from ..core.config import load_config
+from ..core.log import read_log
+from ..core.state import ROOT_ID, TERMINAL
+from ..execution.runs import describe
+from ..tools.builtins.code import _health
+from ..tools.builtins.shared import BuiltinContext, await_run, format_run, start_generated
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
@@ -189,7 +189,7 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
     @app.post("/api/tools", status_code=201)
     async def define_tool(req: DefineToolRequest):
         ctx = _api_ctx(seven)
-        from .tools import TOOL_NAME
+        from ..tools import TOOL_NAME
         if not TOOL_NAME.match(req.name):
             raise _err(400, f"name must match {TOOL_NAME.pattern}")
         try:
@@ -197,7 +197,7 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
         except Exception as err:
             raise _err(400, str(err))
         if req.test_args is not None:
-            from .builtins.code import _trial_run
+            from ..tools.builtins.code import _trial_run
             r = await _trial_run(ctx, req.name, req.code, req.test_args, req.timeout_ms)
             if not r.ok:
                 raise _err(400, f"not saved: the trial run failed\n{format_run(r)}")
@@ -215,7 +215,7 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
 
     @app.delete("/api/tools/{name}")
     async def delete_tool(name: str):
-        from .tools import ToolInUseError
+        from ..tools import ToolInUseError
         try:
             removed = seven.store.remove(name)
         except ToolInUseError as err:
@@ -348,7 +348,7 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
 
     @app.post("/api/skills", status_code=201)
     async def define_skill(req: dict | None = None):
-        from .tools import SKILL_NAME
+        from ..tools import SKILL_NAME
         body = req or {}
         name = str(body.get("name", ""))
         if not SKILL_NAME.match(name):

@@ -3,7 +3,7 @@ import asyncio
 from conftest import until
 from fake_model import reply
 
-from seven.state import ROOT_ID
+from seven.core.state import ROOT_ID
 
 
 async def test_spawn_request_agent_runs_and_reports(started_env):

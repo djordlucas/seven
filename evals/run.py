@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
 from fake_model import ScriptedModel, reply, tc
 
 from seven.app import SevenApp
-from seven.config import load_config
-from seven.state import ROOT_ID
+from seven.core.config import load_config
+from seven.core.state import ROOT_ID
 
 
 async def until(pred, timeout=15.0, interval=0.05) -> bool:
@@ -135,8 +135,8 @@ async def eval_spill_memory_and_discovery(tmp: Path) -> None:
         oid = tool_msg["content"].split("memory ")[1].split(" ")[0]
         out = app.state.get_output(oid)
         assert out["chars"] == 9000
-        from seven.builtins import builtins
-        from seven.builtins.shared import BuiltinContext
+        from seven.tools.builtins import builtins
+        from seven.tools.builtins.shared import BuiltinContext
         ctx = BuiltinContext(agent_id="seven", runner=app.runner, store=app.store, runs=app.supervisor.runs,
                              supervisor=app.supervisor, workspace=str(app.config.workspace), state_db=app.state.path,
                              abort=None, log=app.log.child(agent="seven"))
@@ -157,8 +157,8 @@ async def eval_skills_and_delegate(tmp: Path) -> None:
     app.model.push(reply("sub final"))
     await app.start()
     try:
-        from seven.builtins import builtins
-        from seven.builtins.shared import BuiltinContext
+        from seven.tools.builtins import builtins
+        from seven.tools.builtins.shared import BuiltinContext
         ctx = BuiltinContext(agent_id="seven", runner=app.runner, store=app.store, runs=app.supervisor.runs,
                              supervisor=app.supervisor, workspace=str(app.config.workspace), state_db=app.state.path,
                              abort=None, log=app.log.child(agent="seven"))

@@ -15,7 +15,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .state import State
+from ..core.state import State
 
 TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 SKILL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -69,7 +69,7 @@ class ToolStore:
              source: str, timeout_ms: int | None = None) -> dict:
         if not TOOL_NAME.match(name):
             raise ValueError(f'invalid tool name "{name}": must match {TOOL_NAME.pattern}')
-        from .state import now_iso
+        from ..core.state import now_iso
         t = now_iso()
         self.state._exec(
             """INSERT INTO tools (name, description, parameters, deps, packages, timeout_ms, revision, source, created_at, updated_at)
@@ -87,7 +87,7 @@ class ToolStore:
         return saved["meta"]
 
     def set_disabled(self, name: str, reason: str | None) -> bool:
-        from .state import now_iso
+        from ..core.state import now_iso
         cur = self.state._exec("UPDATE tools SET disabled_at = ?, disabled_reason = ? WHERE name = ?",
                                (None if reason is None else now_iso(), reason, name))
         return cur.rowcount > 0

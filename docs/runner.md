@@ -1,7 +1,7 @@
 # The runner
 
 The runner runs code the model writes. Each run is a fresh Python child process
-(`python -m seven._child`) that imports one module file, calls its `default`
+(`python -m seven.execution.child`) that imports one module file, calls its `default`
 export, and is killed, along with everything it spawned, as soon as the result
 is back. A run has all of Python's standard library and any pip package. **There
 is no permission model.** The process boundary contains crashes, runaway loops,
@@ -30,7 +30,7 @@ isolation is its container.
 | Step | What happens |
 |------|--------------|
 | Install | Every top-level import that is not stdlib is a pip package. A missing one is installed with `pip install --target <workspace>/.seven/site-packages` (serialised within one seven process); a syntax error is reported here, before any process starts. |
-| Spawn | `python -u -m seven._child` starts in its own process group, with the workspace as its working directory, seven's environment, and an address-space cap (`SEVEN_RUN_MEMORY_MB`, via `RLIMIT_AS`). |
+| Spawn | `python -u -m seven.execution.child` starts in its own process group, with the workspace as its working directory, seven's environment, and an address-space cap (`SEVEN_RUN_MEMORY_MB`, via `RLIMIT_AS`). |
 | Call | The module is imported with a `seven` global injected. `default` that is callable is called once with the run's arguments (default `{}`) and awaited if it returns an awaitable; any other `default` is awaited and is the result; no `default` gives `null`. |
 | Result | The result is JSON round-tripped back to the parent. A thrown error becomes `error`, with its traceback. A value `json.dumps` rejects fails the run with that error. |
 | Teardown | The whole process group is killed with `SIGKILL` once the result arrives, so open timers, sockets, servers and child processes end with the run. |

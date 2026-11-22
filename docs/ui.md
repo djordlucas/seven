@@ -1,7 +1,7 @@
 # The UI
 
 `seven serve` serves a companion single-page UI at `/` — vanilla HTML/CSS/JS
-in `seven/ui/`, no build step. It is feature-complete: every endpoint in
+in `seven/api/ui/`, no build step. It is feature-complete: every endpoint in
 [api.md](api.md) has a surface here.
 
 | View | Covers |

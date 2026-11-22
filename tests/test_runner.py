@@ -1,6 +1,6 @@
 
-from seven.log import Logger
-from seven.runner import Runner, scan_imports
+from seven.core.log import Logger
+from seven.execution.runner import Runner, scan_imports
 
 
 def make_runner(tmp_path, host=None) -> Runner:

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from ..tools import SKILL_NAME
+from ..store import SKILL_NAME
 from .shared import Builtin, BuiltinContext
 
 

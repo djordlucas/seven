@@ -22,44 +22,58 @@ on `main`**. If you hit that block, you are on `main` — branch and retry.
 Seven is one Python process — a FastAPI app — running many agents, with all
 state in one SQLite file:
 
-- **The API** (`seven/api.py`) is the way in: REST under `/api/…` (agents,
+- **The API** (`seven/api/app.py`) is the way in: REST under `/api/…` (agents,
   messages, tools, runs, logs, config, exec, events), SSE at `/api/events`, and
-  the companion UI (`seven/ui/`, vanilla JS, no build) served at `/`. The CLI
+  the companion UI (`seven/api/ui/`, vanilla JS, no build) served at `/`. The CLI
   (`seven/__main__.py`) holds the workspace **lease** for `serve`; the other
   commands read the state database or the log directly, so they work while a
   server runs.
-- **The supervisor** (`seven/supervisor.py`) runs every **agent**'s loop
-  (`seven/agent.py`) concurrently, driving them from their **inboxes**.
+- **The supervisor** (`seven/agent/supervisor.py`) runs every **agent**'s loop
+  (`seven/agent/agent.py`) concurrently, driving them from their **inboxes**.
   `docs/agents.md` has the modes and messaging.
-- Every agent calls **Mistral** (`seven/llm.py`) through one client capped at
-  `SEVEN_LLM_CONCURRENCY` calls, with the built-ins (`seven/builtins/`) plus
-  every **generated tool** in the **tool store** (`seven/tools.py`). The store
+- Every agent calls **Mistral** (`seven/core/llm.py`) through one client capped at
+  `SEVEN_LLM_CONCURRENCY` calls, with the built-ins (`seven/tools/builtins/`) plus
+  every **generated tool** in the **tool store** (`seven/tools/store.py`). The store
   is read every model step, so a tool any agent defines is callable by all on
   their next step.
 - **State** — agents, conversations, inboxes, tools, runs, the lease — is
-  `<workspace>/.seven/seven.db` (`seven/state.py`, `sqlite3`, WAL). All data
+  `<workspace>/.seven/seven.db` (`seven/core/state.py`, `sqlite3`, WAL). All data
   lives in the workspace (`docs/data.md`).
-- Built-in and generated code runs in the **runner** (`seven/runner.py` +
-  `seven/_child.py`): one Python child process per run, killed with its process
+- Built-in and generated code runs in the **runner** (`seven/execution/runner.py` +
+  `seven/execution/child.py`): one Python child process per run, killed with its process
   group when the result is back, pip packages installed on demand. The runner
   has **no permission model** by design (`docs/runner.md`).
+
+Components are divided by package:
+
+```text
+seven/
+  __init__.py     version
+  __main__.py     CLI: serve holds the lease; agents/send/tools/logs read state
+  app.py          composition root: wires the packages below into SevenApp
+  core/           config.py · log.py · state.py (SQLite) · llm.py (Mistral client)
+  execution/      runner.py · child.py (python -m seven.execution.child) · runs.py
+  tools/          store.py (generated tools) · builtins/ (the built-in tools)
+  agent/          agent.py (the loop) · supervisor.py · prompt.py · compact.py
+  api/            app.py (FastAPI: /api/…, /api/events) · ui/ (the web UI at /)
+```
 
 ## Changes that cross layers
 
 - **Adding a host function** (`seven.<module>.<fn>` in a run) touches four
   places in lockstep: the `host` map in `seven/app.py` passed to the runner, a
   test in `tests/test_runner.py` that calls it from a run, the system prompt
-  (`seven/prompt.py`) — the model only uses what it is told exists — and the
+  (`seven/agent/prompt.py`) — the model only uses what it is told exists — and the
   host function table in `docs/runner.md`. Most capabilities need none of this:
   a run already has all of Python.
-- **Adding a built-in tool** touches `seven/builtins/` (one entry), the
+- **Adding a built-in tool** touches `seven/tools/builtins/` (one entry), the
   built-in table in `docs/architecture.md`, the system prompt in
-  `seven/prompt.py`, and a test in `tests/test_builtins.py` or
+  `seven/agent/prompt.py`, and a test in `tests/test_builtins.py` or
   `tests/test_agent.py`. The API mirrors built-ins where it makes sense
   (`/api/tools/{name}/call`, `/api/exec`); keep `docs/api.md` in step.
-- **Adding an API route** means a UI surface for it in `seven/ui/app.js` and a
+- **Adding an API route** means a UI surface for it in `seven/api/ui/app.js` and a
   row in `docs/api.md` — the UI is feature-complete by agreement.
-- **Logging is part of a component.** Take a `Logger` (`seven/log.py`), narrow
+- **Logging is part of a component.** Take a `Logger` (`seven/core/log.py`), narrow
   it with `child()` to what you are working on (agent, turn, run…), log each
   state change at `info`, failures at `warn`/`error`, and content only at
   `debug` through `preview()`. Never log the API key. A new `msg` goes in the
@@ -93,15 +107,16 @@ gate.
 
 ## Python
 
-- Python **3.11+** (`pyproject.toml`); the package is `seven/`, tests in
-  `tests/` with `pytest` + `pytest-asyncio` (`asyncio_mode = "auto"` in
-  `pyproject.toml`).
+- Python **3.11+** (`pyproject.toml`); the package is `seven/`, divided by
+  component into `core/` `execution/` `tools/` `agent/` `api/` (layout above);
+  tests in `tests/` with `pytest` + `pytest-asyncio` (`asyncio_mode = "auto"`
+  in `pyproject.toml`).
 - One `sqlite3` connection per process, WAL mode, guarded by a lock; all API
   handlers are `async def` so they share the one event loop with the agents.
-- The runner spawns `python -m seven._child` per run; the request crosses on
+- The runner spawns `python -m seven.execution.child` per run; the request crosses on
   stdin, host calls and the result on a passed fd, stdout/stderr are the run's
   captured output.
-- Configuration comes from the environment (`seven/config.py`); a `.env` file
+- Configuration comes from the environment (`seven/core/config.py`); a `.env` file
   in the current directory is also read, without overriding variables already
   set in the environment (compose passes `.env` through `env_file` as well).
 

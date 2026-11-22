@@ -2,7 +2,7 @@
 from fake_model import reply, tc
 
 from seven.agent import Agent, AgentDeps
-from seven.state import ROOT_ID
+from seven.core.state import ROOT_ID
 
 
 def make_agent(env, agent_id=ROOT_ID, model=None) -> Agent:

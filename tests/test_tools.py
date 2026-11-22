@@ -1,4 +1,4 @@
-from seven.state import State
+from seven.core.state import State
 from seven.tools import TOOL_NAME, ToolStore
 
 
