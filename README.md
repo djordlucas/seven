@@ -9,7 +9,7 @@
  ╚══════╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝
 ```
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/Python-3.15+-3776AB.svg)](pyproject.toml)
 [![Status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)](#project-status)
 
 Seven is an **experiment in an LLM agent that builds itself**. It starts with
