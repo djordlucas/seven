@@ -7,6 +7,7 @@ decision ships. New ADRs are numbered (`0001-…`, `0002-…`).
 | ADR | Decision |
 |-----|----------|
 | [0001-python-fastapi-reset.md](0001-python-fastapi-reset.md) | Reset the codebase from Node.js/TypeScript to Python/FastAPI: seven is one FastAPI process with an API and a companion UI |
+| [0002-agent-architecture-fine-tuning.md](0002-agent-architecture-fine-tuning.md) | Proposed: small architecture changes on `feat/agent-architecture-fine-tuning`, requirements and design agreed before implementation |
 
 ## Limits
 
