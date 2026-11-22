@@ -18,6 +18,7 @@ child-process runner, SQLite state in `.seven/seven.db`, REST + SSE + UI.
 | R1 | The supervisor can run autonomously — "like a process", besides the interactive root agent — in three kinds of work: **until a goal is attained**, **until a task is done**, or **periodically**. Controlled through messages (an agent conversation) or a UI control, and persisted, so a seven restart does not stop it. Extended: the same capability applies to **sub-agents** — a job can attach to any existing agent, and any agent can start/stop jobs on itself or others. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
 | R2 | **Every message peer — the supervisor and every agent (root or sub) — has a persisted inbox and outbox**, so agent-to-agent and agent-to-supervisor communication is first-class: sending records both sides, and either side can read what it received and what it sent. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
 | R3 | **Efficient use of context**: (a) long tool output is spilled to memory and read back by chunks instead of entering the conversation whole; (b) the full tool-schema set is not sent every step — tools are exposed through discovery or skills; (c) work is delegated to sub-agents when possible, so only their final answer enters the parent's context. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
+| R4 | **Skills are a first-class concept** (refining R3b): a skill lists tools (plus description and instructions); **a tool used in a skill cannot be deleted — the skill must be changed first**; skills get **full CRUD from both the user (API/UI) and the model (built-ins)**. | maintainer, design session on `feat/agent-architecture-fine-tuning` |
 
 ## Proposed design for R1
 
@@ -62,9 +63,22 @@ Three mechanisms; (a) and (b) change the agent loop's request/result handling,
 | Part | Design |
 |------|--------|
 | (a) Output memory | Tool results longer than `SEVEN_SPILL_CHARS` (default 2,000) are **not** put in the conversation whole. The full result is stored under `.seven/memory/<call_id>.out` with an index row (`outputs` table: call id, agent, tool, chars, lines, path, created_at), and the `tool` message carries only a reference: `output saved to memory <call_id> (N chars, M lines); read it in chunks with read_memory("<call_id>", from, to)`. New built-in `read_memory(id, offset=0, limit=4000)` returns a character window (with total size and a hint for the next offset). Shorter results stay inline as today. Nothing is lost — the 16,000-char truncation becomes spill + reference instead of a hard cut. |
-| (b) Discovery / skills | Every step no longer sends all ~20 built-in schemas plus every generated tool's schema. A **core set** is always sent: `run_python`, `define_tool`, `read_tool`, `delegate`, `send_message`, `wait_message`, `spawn_agent`, `read_memory`, plus the meta-tools `list_tools`, `describe_tool`, `list_skills`, `load_skill`. Everything else (the run-control built-ins, `sql`, all generated tools) is discoverable: `list_tools(query?)` lists name+description, `describe_tool(name)` returns the full schema, and from the next step the tool is callable. **Skills** are named bundles (description + instructions + tool names) in a new `skills` table; `list_skills` shows them, `load_skill(name)` adds their schemas (and the skill's instructions into the system prompt) for that agent, persisted per agent (`agents.loaded_skills`) so restarts keep them. |
+| (b) Discovery / skills | Every step no longer sends all ~20 built-in schemas plus every generated tool's schema. A **core set** is always sent: `run_python`, `define_tool`, `read_tool`, `delegate`, `send_message`, `wait_message`, `spawn_agent`, `read_memory`, plus the meta-tools `list_tools`, `describe_tool`, `list_skills`, `load_skill`/`unload_skill`. Everything else (the run-control built-ins, `sql`, all generated tools) is discoverable: `list_tools(query?)` lists name+description, `describe_tool(name)` returns the full schema, and from the next step the tool is callable. Skills themselves are specified in R4. |
 | (c) Delegation | New built-in `delegate(task, instructions?, name?)`: spawns a `request` sub-agent with the task, waits for its final answer (`wait_message` from it), returns **only the final answer** (spilled per (a) if long) to the parent, and stops the sub-agent. The sub-agent's whole conversation never enters the parent's context. The system prompt steers the agent to delegate long or independent sub-tasks. Counts toward `SEVEN_MAX_AGENTS` while running. |
 | Config | `SEVEN_SPILL_CHARS` (2,000), `SEVEN_MEMORY_DIR` (`.seven/memory`), `SEVEN_CORE_TOOLS` (the core list above, overridable). Discovery can be switched back to "all schemas" with `SEVEN_TOOL_DISCOVERY=0` for comparison. |
+
+## Proposed design for R4 (skills)
+
+A skill is a named bundle of **tools plus description and instructions**.
+
+| Element | Design |
+|---------|--------|
+| State | `skills` table (schema v2): `name` PK (same `^[a-z][a-z0-9_]{0,63}$` rule as tools), `description`, `instructions`, `tools` (JSON array of generated-tool names), `created_at`, `updated_at`. Agents gain `loaded_skills` (JSON array) in the same v2 rebuild. |
+| Model CRUD (built-ins) | `define_skill(name, description, instructions, tools[])` creates or replaces a skill (validates the name rule and that **every listed tool exists** — missing ones are named in the error). `read_skill(name)` returns the definition plus whether the caller has it loaded. `list_skills()` lists all with the caller's loaded flag. `delete_skill(name)` deletes and scrubs the name from every agent's `loaded_skills`. `load_skill(name)` / `unload_skill(name)` manage the caller's loaded set (persisted, so a restart keeps it); a loaded skill's tool schemas are sent from the next step and its instructions join the system prompt. |
+| User CRUD (API/UI) | `GET /api/skills`, `POST /api/skills` (upsert, same validation), `GET /api/skills/{name}`, `DELETE /api/skills/{name}`. UI: a Skills view with an editor (name, description, instructions, tools chosen from the existing tools) and delete; the agent pane can load/unload a skill for that agent; the tool detail shows which skills use a tool. |
+| Delete protection | `ToolStore.remove(name)` (behind `delete_tool` and `DELETE /api/tools/{name}`) refuses while any skill lists the tool: `error: tool "x" is used by skill(s) a, b — change the skill first (define_skill without x) or delete_skill`. Containment checked with `json_each(skills.tools)`. Redefining (`define_tool`) and disabling are not blocked — only deletion. |
+| Prompt | The system prompt lists skills by name + description (small) and appends the instructions of loaded skills; skill tools' schemas are sent only while loaded. |
+| Events | `skill_defined`, `skill_deleted`, `skill_loaded`, `skill_unloaded` join the SSE stream for the UI. |
 
 ## Consequences
 
@@ -77,11 +91,13 @@ Three mechanisms; (a) and (b) change the agent loop's request/result handling,
 - `supervisor.py`: job driving in `tick()`, supervisor-inbox command grammar,
   per-agent attachment, start/stop/pause/resume.
 - `builtins/`: `start_job`/`stop_job`/`list_jobs`/`list_inbox`/`list_outbox`/
-  `read_memory`/`list_tools`/`describe_tool`/`list_skills`/`load_skill`/
-  `delegate`; `send_message`/`wait_message` accept `supervisor`.
-- `api.py` + `seven/ui/`: `/api/jobs`, `/api/skills`, `/api/memory/{id}`,
+  `read_memory`/`list_tools`/`describe_tool`/`define_skill`/`read_skill`/
+  `list_skills`/`delete_skill`/`load_skill`/`unload_skill`/`delegate`;
+  `send_message`/`wait_message` accept `supervisor`; `delete_tool` refuses
+  tools referenced by a skill.
+- `api.py` + `seven/ui/`: `/api/jobs`, `/api/skills` (full CRUD), `/api/memory/{id}`,
   outbox and supervisor-peer endpoints, Jobs/Skills views, agent-pane mail
-  tabs and memory reader, tool discovery surfaces.
+  tabs and memory reader, tool discovery surfaces, load/unload per agent.
 - `docs/` (architecture, agents, api, ui, data, runner) updated in the same
   change; `prompt.py` rewritten for discovery + delegation guidance.
 
@@ -94,6 +110,8 @@ Three mechanisms; (a) and (b) change the agent loop's request/result handling,
 | One active job per agent | An agent runs one turn at a time; a second job on the same agent queues behind the first. |
 | Mail is FIFO text-only | No priorities, no attachments; delivery is one `delivered_at` flag, no read receipts. |
 | Discovery costs a step | The model must call `list_tools`/`describe_tool` before using a non-core tool; in exchange every step's prompt is much smaller. |
+| Skills reference existing tools only | `define_skill` refuses tool names that do not exist; deleting a tool used by a skill is refused until the skill changes. |
+| Loaded skills are per agent | `loaded_skills` persists per agent; unloading removes the schemas and instructions from that agent's next steps only. |
 | Spilled output costs a read | The agent pays one `read_memory` call per chunk it actually needs, instead of every step carrying the whole output. |
 | Delegation hides the sub-agent's work | The parent sees only the final answer; the full transcript stays in the sub-agent's row for the UI/logs. |
 | Placeholder designs | Nothing here is implemented yet; the ADR records intent until accepted. |
