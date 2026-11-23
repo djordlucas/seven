@@ -14,10 +14,16 @@ in `seven/api/ui/`, no build step. It is feature-complete: every endpoint in
 | Memory | Spilled outputs (live) with size and tool, and one output read in character chunks. |
 | Config | `/api/config` and `/api/health` as a table (the API key is never sent). |
 
-The top bar shows the instance name (the workspace directory's basename) in the
-center, the live-stream status and a theme switcher (dark/light, remembered in
-`localStorage`). Agent descriptions appear in a floating box after hovering a
-roster row for about a second. |
+The top bar keeps the logo leftmost next to the nav (Agents, Memory, Skills,
+Tools, Activity, Jobs, System) and centers only the name label with the instance
+name (the workspace directory's basename) as a chip; the right side holds the
+theme switcher (dark/light, remembered in `localStorage`), the live-stream dot
+and the health readout. The agent roster is grouped into sections per root
+agent (sticky headers with a spawned count, children indented by depth) and
+grows with its items up to the viewport height; the chat panel always matches
+the roster's height exactly. Agent descriptions appear in a floating box after
+hovering a roster row for about a second (inline under the name on touch
+devices). |
 
 Message bodies (conversation, inbox, outbox) are rendered as markdown by
 `seven/api/ui/markdown.js` — a small dependency-free renderer that escapes all

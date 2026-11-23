@@ -246,14 +246,40 @@ function renderAgents() {
     t.innerHTML = `<tr><td class="kv">no active agents</td></tr>`;
     return;
   }
-  t.innerHTML =
-    `<tr><th>agent</th><th>mode</th><th>status</th><th>inbox</th></tr>` +
-    state.agents.map((a) => `<tr class="clickable ${a.id === state.selectedAgent ? "selected" : ""}" data-id="${esc(a.id)}">
+  // group into sections: one per root agent (no parent in the active list),
+  // descendants listed under it, indented by depth
+  const byId = new Map(state.agents.map((a) => [a.id, a]));
+  const children = new Map();
+  for (const a of state.agents) {
+    if (a.parent && byId.has(a.parent)) {
+      if (!children.has(a.parent)) children.set(a.parent, []);
+      children.get(a.parent).push(a);
+    }
+  }
+  const roots = state.agents.filter((a) => !a.parent || !byId.has(a.parent));
+  const countDesc = (id) =>
+    (children.get(id) ?? []).reduce((n, c) => n + 1 + countDesc(c.id), 0);
+  const row = (a, depth) =>
+    `<tr class="clickable depth-${Math.min(depth, 4)} ${a.id === state.selectedAgent ? "selected" : ""}" data-id="${esc(a.id)}">
       <td><span class="mono">${esc(a.id)}</span> <span class="kv">“${esc(a.name)}”</span>${a.busy ? ' <span class="badge running">busy</span>' : ""}${a.description ? `<div class="row-desc">${esc(a.description)}</div>` : ""}</td>
       <td>${esc(a.mode)}</td>
       <td>${badge(a.status)}</td>
       <td class="mono">${a.inbox_pending}</td>
-    </tr>`).join("");
+    </tr>`;
+  let html = `<tr><th>agent</th><th>mode</th><th>status</th><th>inbox</th></tr>`;
+  for (const root of roots) {
+    const n = countDesc(root.id);
+    html += `<tr class="roster-section"><td colspan="4">${esc(root.name)}${n ? ` <span class="sec-count">· ${n} spawned</span>` : ""}</td></tr>`;
+    html += row(root, 0);
+    const walk = (id, d) => {
+      for (const c of children.get(id) ?? []) {
+        html += row(c, d);
+        walk(c.id, d + 1);
+      }
+    };
+    walk(root.id, 1);
+  }
+  t.innerHTML = html;
   $$("#agents-table tr.clickable").forEach((tr) => (tr.onclick = () => selectAgent(tr.dataset.id)));
 }
 

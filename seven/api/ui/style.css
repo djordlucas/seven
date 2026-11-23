@@ -80,6 +80,8 @@ html, body {
   border-bottom: 1px solid var(--border);
 }
 
+.topbar-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
+
 .nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .nav::-webkit-scrollbar { display: none; }
 .nav-btn {
@@ -90,6 +92,7 @@ html, body {
 .nav-btn:hover { color: var(--text); background: var(--surface-2); }
 .nav-btn.active { color: var(--text); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--border-strong); }
 
+/* only the name label (+ instance chip) sits in the centered column; the logo is leftmost */
 .brand {
   display: flex; align-items: center; gap: 9px; user-select: none;
   justify-self: center;
@@ -230,17 +233,42 @@ select { width: auto; }
 .badge.paused { color: #a082ff; border-color: color-mix(in srgb, #a082ff 50%, var(--border)); background: color-mix(in srgb, #a082ff 12%, transparent); }
 .badge.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 55%, var(--border)); background: color-mix(in srgb, var(--info) 12%, transparent); }
 
-/* ── agents split view: equal-height panels, narrow roster ─ */
+/* ── agents split view: same-height panels, growing roster ─ */
 
 .split { display: grid; grid-template-columns: minmax(280px, 2fr) 3fr; gap: 14px; align-items: stretch; }
-@media (max-width: 1100px) { .split { grid-template-columns: 1fr; align-items: start; } .split > * { min-width: 0; } .agents-side, .chat-pane { height: auto; } }
-.agents-side, .chat-pane { height: max(calc(100vh - 96px), 480px); }
-.agents-side { overflow-y: auto; }
+.split > .panel { margin-top: 0; } /* beat .panel + .panel inside the grid */
+.split > * { min-width: 0; }
+/* the roster grows with its items (capped at the viewport); the chat
+   stretches to match, so both panels are always exactly the same height */
+.agents-side { height: auto; max-height: calc(100vh - 96px); overflow-y: auto; }
+.chat-pane {
+  height: auto; overflow: hidden;
+  min-height: 480px; max-height: calc(100vh - 96px);
+}
+@media (max-width: 1100px) {
+  .split { grid-template-columns: 1fr; align-items: start; }
+  .agents-side, .chat-pane { height: auto; max-height: none; min-height: 0; }
+  .chat-pane { min-height: 480px; }
+}
 
 #agents-table th:nth-child(1) { width: 44%; }
 #agents-table th:nth-child(2) { width: 22%; }
 #agents-table th:nth-child(3) { width: 20%; }
 #agents-table th:nth-child(4) { width: 14%; }
+
+/* roster sections: one per root agent, children indented under it */
+.roster-section td {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface-3); color: var(--dim);
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 1px;
+  padding: 5px 10px; border-bottom: 1px solid var(--border);
+}
+.roster-section .sec-count { color: var(--faint); text-transform: none; letter-spacing: 0; font-weight: 400; }
+#agents-table tr.depth-1 td:first-child { padding-left: 24px; }
+#agents-table tr.depth-2 td:first-child { padding-left: 38px; }
+#agents-table tr.depth-3 td:first-child { padding-left: 52px; }
+#agents-table tr.depth-4 td:first-child { padding-left: 66px; }
 
 .chat-pane { display: flex; flex-direction: column; }
 .chat-head { align-items: flex-start; }
@@ -420,13 +448,15 @@ select { width: auto; }
 @media (max-width: 760px) {
   html, body { font-size: 13.5px; }
 
-  /* two-row top bar: brand + controls, then a scrollable nav row */
+  /* two-row top bar: logo + name + controls, then a scrollable nav row */
   .topbar { display: flex; flex-wrap: wrap; align-items: center; height: auto; padding: 8px 10px 0; gap: 8px; }
-  .brand { margin-right: auto; gap: 7px; }
+  .topbar-left { display: contents; }
+  .brand-mark { order: 1; }
+  .brand { order: 2; gap: 7px; margin-left: 2px; }
   .brand-name { font-size: 15px; }
-  .topbar-right { gap: 7px; }
+  .topbar-right { order: 3; margin-left: auto; gap: 7px; }
   .health { display: none; }
-  .nav { order: 3; flex-basis: 100%; margin: 2px -10px 0; padding: 0 10px 8px; }
+  .nav { order: 4; flex-basis: 100%; margin: 2px -10px 0; padding: 0 10px 8px; }
   .nav-btn { padding: 8px 11px; font-size: 12.5px; }
 
   .content { padding: 10px; }
@@ -438,9 +468,7 @@ select { width: auto; }
   .btn.small { padding: 6px 10px; }
   .tab, .subtabs .tab { padding: 9px 11px; font-size: 12.5px; }
 
-  /* agents: stacked; roster capped, chat gets a real message area */
-  .split > * { min-width: 0; }
-  .agents-side { max-height: 44vh; }
+  /* agents: stacked; the roster grows with its items, chat keeps a message area */
   .messages { min-height: 46vh; }
   .mail-pane { min-height: 40vh; }
   #agents-table th:nth-child(2), #agents-table td:nth-child(2),
