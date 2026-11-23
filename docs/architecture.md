@@ -108,6 +108,7 @@ ends with `Stopped after N steps without a final answer.`
 | `define_skill`, `read_skill`, `list_skills`, `delete_skill`, `load_skill`, `unload_skill` | Skills: named bundles of generated tools plus instructions; loading one makes its tools callable (`agents.md#skills). |
 | `list_tools`, `describe_tool` | Tool discovery: list everything that exists; reveal one tool's schema, persistently, so it is callable from the next step. |
 | `read_memory` | Read a character window of spilled output (`SEVEN_MEMORY_DIR`), with total size and next offset. |
+| `remember`, `recall`, `forget` | Per-agent key/value memory in the state DB (`kv` table) — CRUD: upsert, paged read (`offset`/`limit`), key listing with previews, delete. 64 KB value cap. |
 | `sql` | Runs SQL on a SQLite database file in the workspace (`data.md`). |
 
 The built-ins are deliberately limited to running code, managing generated
@@ -243,7 +244,7 @@ already set in the environment; `compose.yaml` passes `.env` through
 | `SEVEN_LLM_CONCURRENCY` | `4` | Model calls in flight at once, across all agents. |
 | `SEVEN_SPILL_CHARS` | `2000` | Tool results longer than this are spilled to memory instead of entering the conversation. `0` disables spilling. |
 | `SEVEN_MEMORY_DIR` | `.seven/memory` | Where spilled output files live; relative paths resolve against the workspace. |
-| `SEVEN_CORE_TOOLS` | `run_python,define_tool,read_tool,delegate,send_message,wait_message,spawn_agent,read_memory` | Comma-separated tools always in the tool list when discovery is on. |
+| `SEVEN_CORE_TOOLS` | `run_python,define_tool,read_tool,delegate,send_message,wait_message,spawn_agent,read_memory,remember,recall,forget` | Comma-separated tools always in the tool list when discovery is on. |
 | `SEVEN_TOOL_DISCOVERY` | `1` | `0` sends every tool schema on every step. |
 | `SEVEN_DELEGATE_TIMEOUT_S` | `600` | How long `delegate` waits for the sub-agent's answer. |
 | `SEVEN_LOG_LEVEL`, `SEVEN_LOG_FILE`, `SEVEN_LOG_STDERR` | `info`, `.seven/logs/seven.log`, on for `serve` | Logging (`logging.md`). |

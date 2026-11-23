@@ -206,3 +206,36 @@ async def test_mail_jobs_skills_memory_endpoints(api):
     assert r.json()["ok"]
     r = await c.get("/api/memory")
     assert r.status_code == 200
+
+
+async def test_kv_endpoints(api):
+    c = api.client
+    r = await c.get("/api/kv")
+    assert r.status_code == 200 and r.json() == []
+    r = await c.put("/api/kv/seven/todo", json={"value": "buy milk"})
+    assert r.status_code == 200 and r.json()["value"] == "buy milk" and r.json()["chars"] == 8
+    r = await c.put("/api/kv/seven/todo", json={"value": "buy oat milk"})
+    assert r.status_code == 200 and r.json()["chars"] == 12  # overwrite
+    r = await c.put("/api/kv/a9/note", json={"value": "hi"})
+    assert r.status_code == 200
+    r = await c.get("/api/kv")
+    keys = {(k["agent"], k["key"]) for k in r.json()}
+    assert keys == {("seven", "todo"), ("a9", "note")}
+    assert all("value" not in k for k in r.json())  # the list omits values
+    assert all("preview" in k for k in r.json())  # …but carries a short preview
+    r = await c.get("/api/kv", params={"agent": "seven"})
+    assert [k["key"] for k in r.json()] == ["todo"]
+    r = await c.get("/api/kv/seven/todo")
+    assert r.json()["value"] == "buy oat milk"
+    r = await c.get("/api/kv/seven/nope")
+    assert r.status_code == 404
+    r = await c.put("/api/kv/seven/bad%20key", json={"value": "x"})
+    assert r.status_code == 400
+    r = await c.put("/api/kv/seven/big", json={"value": "x" * 70000})
+    assert r.status_code == 413
+    r = await c.delete("/api/kv/a9/note")
+    assert r.status_code == 200
+    r = await c.delete("/api/kv/a9/note")
+    assert r.status_code == 404
+    # persisted in state
+    assert api.seven.state.kv_get("seven", "todo")["value"] == "buy oat milk"

@@ -28,7 +28,8 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `POST /api/agents/{id}/compact` | Compact the conversation now; 409 when there is nothing to fold. |
 | `DELETE /api/agents/{id}/conversation` | Clear the conversation and summary. |
 | `GET /api/tools` | Generated tools with revision, state, run limit. |
-| `POST /api/tools` | Define one: `name`, `description`, `parameters`, `code`, optional `deps`, `test_args`, `timeout_ms`. Runs the trial first when `test_args` is set. 400 on a bad name, syntax error or failed trial. |
+| `POST /api/tools` | Define one: `name`, `description`, `parameters`, `code`, optional `deps`, `libs` (`["name"]` or `["name@rev"]` — bundled and pinned per revision), `test_args`, `timeout_ms`. Runs the trial first when `test_args` is set. 400 on a bad name, unknown library, syntax error or failed trial. |
+| `POST /api/tools/{name}/rebundle` | Re-pin the tool's libraries (default: latest revision of each current pin), trial-run against the new bundle when `test_args` was stored, and update the pins only if the trial passes. |
 | `GET /api/tools/{name}` | Definition and source, plus the skills using it. |
 | `DELETE /api/tools/{name}` | Delete it and its history; 409 naming the skills while one uses it. |
 | `POST /api/tools/{name}/disable` | `{"reason"}`; calls are refused while disabled. |
@@ -53,8 +54,42 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `POST /api/skills/{name}/unload?agent=a1` | Unload it from one agent. |
 | `GET /api/memory` | Spilled outputs, newest first: id, agent, tool, path, chars, lines. |
 | `GET /api/memory/{oid}?offset=&limit=` | One spilled output as a character window: `chunk`, `total_chars`, `next_offset`. |
+| `GET /api/kv?agent=` | Per-agent key/value memory entries (newest first): agent, key, chars, updated_at, plus an 80-char `preview` — full values omitted. |
+| `GET /api/kv/{agent}/{key}` | One entry including `value`. 404 if missing. |
+| `PUT /api/kv/{agent}/{key}` | Set/overwrite: `{"value"}` (64 KB cap → 413). Keys are 1-64 chars of `[A-Za-z0-9_.-]`. Emits `kv_changed`. |
+| `DELETE /api/kv/{agent}/{key}` | Delete one entry; 404 if missing. Emits `kv_changed`. |
+| `GET /api/libs` | Generated libraries with revision and dependent-tool count. |
+| `POST /api/libs` | Define one: `name`, `description`, `code`. Each save is a new revision; 400 on a bad name or syntax error. |
+| `GET /api/libs/{name}` | One library: meta, source, and `dependents` (tool, tool revision, pinned lib revision). |
+| `DELETE /api/libs/{name}?force=` | Delete; 409 listing the bundling tools unless `force=true` (force strips their pins). |
+| `POST /api/libs/{name}/revalidate?libs=&apply=` | Rebundle every dependent tool against the latest (or given) revisions; `apply=false` is a dry run. |
 | `GET /api/logs?agent=&turn=&run=&level=&grep=&tail=` | Structured log lines, filtered (`logging.md`). |
 | `GET /api/events?agent=` | SSE stream of agent events (below). |
+| `GET /api/files/list?rel=` | List a workspace folder (`entries`: name, kind, size, mtime; dirs first) or stat one file. |
+| `GET /api/files/read?rel=` | Read a text file (256 KB cap): `content`, plus `size`, `truncated`, `binary` (binary files return `content: null`). |
+| `PUT /api/files/write` | Create/overwrite a text file: `{"path", "content"}` (4 MB cap); parent folders are created. |
+| `POST /api/files/mkdir` | `{"path"}`; 409 if it exists. |
+| `POST /api/files/rename` | `{"src", "dst"}` — rename or move within the workspace; 409 if `dst` exists. |
+| `DELETE /api/files?rel=&recursive=` | Delete a file, or a folder (`recursive=true` for non-empty ones). The workspace root is refused. |
+| `POST /api/files/upload?rel=` | Upload with the raw request body as the file bytes; `rel` is the destination path (parent folders are created, or pass a directory to keep the client filename). |
+| `GET /api/files/download?rel=` | Download a file. |
+
+All `/api/files` paths are relative to the workspace root and resolved before
+use — anything escaping it (`..`, absolute paths, symlinks out) gets a 400.
+
+## Libraries and bundling
+
+A **library** is a generated shared module (`POST /api/libs`, or the
+`define_library` builtin); every definition is a new revision and every
+revision's source is kept (`.seven/libs/<name>/r<N>.py`). A tool declares
+`libs: ["mathx", "helpers@2"]` when defined; those exact revisions are recorded
+in the tool's manifest and passed to every run, where the child process serves
+`import <name>` from the pinned revision files via an import hook. Redefining a
+library therefore never changes what an existing tool imports. To adopt a new
+revision safely, `rebundle_tool` / `POST /api/tools/{name}/rebundle` re-pins to
+the latest (or given) revisions, trial-runs the tool against the new bundle
+(with the stored `test_args`), and keeps the new pins only if the trial passes.
+`POST /api/libs/{name}/revalidate` does this for every dependent tool at once.
 
 Errors are `{"detail": "…"}` with a 4xx status.
 
@@ -72,6 +107,7 @@ one agent's events (plus messages to or from it). Event types:
 | `spawned` / `finished` | An agent was spawned / ended: `{type, agent, …}`. |
 | `job_started` / `job_updated` / `job_finished` | A job started, changed status, or ended: `{type, job, kind?, status, detail?}`. |
 | `skill_defined` / `skill_deleted` / `skill_loaded` / `skill_unloaded` | A skill changed: `{type, skill, tools?|agent?}`. |
+| `kv_changed` | A key/value memory entry was set or deleted: `{type, agent, key, op}`. |
 
 ```bash
 curl -N "http://127.0.0.1:8000/api/events?agent=seven"

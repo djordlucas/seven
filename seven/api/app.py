@@ -12,7 +12,7 @@ from .. import __version__
 from ..app import SevenApp
 from ..core.config import load_config
 from .common import UI_DIR
-from .routes import agents, jobs, memory, meta, runs, skills, tools
+from .routes import agents, files, jobs, libs, memory, meta, runs, skills, tools
 
 
 def create_app(seven: SevenApp | None = None) -> FastAPI:
@@ -33,7 +33,7 @@ def create_app(seven: SevenApp | None = None) -> FastAPI:
 
     app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
 
-    for r in (meta.router, agents.router, tools.router, runs.router, jobs.router, skills.router, memory.router):
+    for r in (meta.router, agents.router, files.router, tools.router, libs.router, runs.router, jobs.router, skills.router, memory.router):
         app.include_router(r)
 
     return app

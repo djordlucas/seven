@@ -35,6 +35,7 @@ while the server process runs agents.
 | `tool_runs` | Finished run of a generated tool: revision, calling agent, sync or async, outcome, duration, first error line; the newest 100 per tool are kept |
 | `runs` | Background run: agent, tool, status, result, last 500 output lines (longer output is spilled to `.seven/memory/`) |
 | `outputs` | Spilled output: id (tool call id or run id), agent, tool, file path, chars, lines, when |
+| `kv` | Per-agent key/value memory (`remember`/`recall`/`forget`): agent, key, value (64 KB cap), chars, when updated |
 | `lease` | The process running agents, and its last heartbeat |
 | `meta` | Schema version and the counters behind agent, run and job ids |
 

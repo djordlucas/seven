@@ -199,3 +199,33 @@ async def test_skill_crud_and_delete_protection(started_env):
     await builtins()["delete_skill"].run({"name": "math"}, ctx)
     assert env.state.get_skill("math") is None
     assert "math" not in env.state.get_agent(ROOT_ID)["loaded_skills"]
+
+
+async def test_remember_recall_forget_builtins(started_env):
+    env = started_env
+    b = builtins()
+    assert {"remember", "recall", "forget"} <= set(b)
+    ctx = make_ctx(env, "a7")
+    out = await b["remember"].run({"key": "todo", "value": "write tests"}, ctx)
+    assert "remembered todo" in out
+    assert env.state.kv_get("a7", "todo")["value"] == "write tests"
+    out = await b["remember"].run({"key": "todo", "value": "write more tests"}, ctx)
+    assert "updated todo" in out  # upsert reports update
+    assert "bad key" in await b["remember"].run({"key": "bad key", "value": "x"}, ctx)
+    assert "too large" in await b["remember"].run({"key": "big", "value": "x" * 70000}, ctx)
+    out = await b["recall"].run({"key": "todo"}, ctx)
+    assert "write more tests" in out and "16 chars total" in out
+    # paging through a value, like read_memory
+    await b["remember"].run({"key": "blob", "value": "y" * 9000}, ctx)
+    page1 = await b["recall"].run({"key": "blob", "offset": 0, "limit": 4000}, ctx)
+    assert "9000 chars total" in page1 and "showing [0, 4000)" in page1 and 'next: recall("blob", 4000, 4000)' in page1
+    page3 = await b["recall"].run({"key": "blob", "offset": 8000, "limit": 4000}, ctx)
+    assert "showing [8000, 9000)" in page3 and "next:" not in page3
+    out = await b["recall"].run({}, ctx)
+    assert "2 key(s)" in out and "todo" in out and "write more tests" in out  # list shows value previews
+    # keys are per-agent
+    other = make_ctx(env, "a8")
+    assert (await b["recall"].run({"key": "todo"}, other)).startswith("error:")
+    assert "forgot todo" in await b["forget"].run({"key": "todo"}, ctx)
+    assert env.state.kv_get("a7", "todo") is None
+    assert (await b["forget"].run({"key": "todo"}, ctx)).startswith("error:")

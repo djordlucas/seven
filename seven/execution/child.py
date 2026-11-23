@@ -52,6 +52,21 @@ class _Llm:
         return self._rpc.call("llm", "chat", [prompt, system])
 
 
+class _LibFinder:
+    """Serves `import <lib>` for bundled generated libraries: each name maps to the
+    exact pinned revision file passed in the run request, so a library's newer
+    revisions never leak into a tool that pinned an older one."""
+
+    def __init__(self, libs: dict[str, str]):
+        self.libs = libs
+
+    def find_spec(self, fullname, path=None, target=None):
+        file = self.libs.get(fullname)
+        if file is None:
+            return None
+        return importlib.util.spec_from_file_location(fullname, file)
+
+
 class _Seven:
     def __init__(self, rpc: _Rpc, workspace: str):
         self.llm = _Llm(rpc)
@@ -79,6 +94,9 @@ def main() -> None:
     site = req.get("site_packages")
     if site:
         sys.path.insert(0, site)
+    libs = req.get("libs") or {}
+    if libs:
+        sys.meta_path.insert(0, _LibFinder(libs))
     seven = _Seven(rpc, req["workspace"])
     spec = importlib.util.spec_from_file_location("seven_run_module", req["file"])
     mod = importlib.util.module_from_spec(spec)

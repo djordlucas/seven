@@ -1,0 +1,16 @@
+# Development override with hot-reload — use with the base compose.yaml:
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up --build
+#
+# The package source is bind-mounted over the installed one, `seven serve
+# --reload` restarts uvicorn on Python changes, and the UI in seven/api/ui is
+# served from disk, so UI edits show up on refresh with no restart.
+services:
+  seven:
+    ports:
+      - "7777:7777"
+    volumes:
+      - ./seven:/app/seven
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./workspace:/workspace
+    command: ["seven", "serve", "--host", "0.0.0.0", "--port", "7777", "--reload"]

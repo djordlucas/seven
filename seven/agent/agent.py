@@ -55,6 +55,7 @@ class AgentDeps:
     core_tools: tuple[str, ...] = ()
     tool_discovery: bool = True
     log: Logger = noop_logger
+    libstore: object = None
     on_event: Callable[[dict], None] | None = None
 
 
@@ -308,7 +309,8 @@ class Agent:
         return result
 
     def builtin_context(self, log: Logger) -> BuiltinContext:
-        return BuiltinContext(agent_id=self.id, runner=self.deps.runner, store=self.deps.store, runs=self.deps.runs,
+        return BuiltinContext(agent_id=self.id, runner=self.deps.runner, store=self.deps.store,
+                              libstore=self.deps.libstore, runs=self.deps.runs,
                               supervisor=self.deps.supervisor, state=self.deps.state, workspace=self.deps.workspace,
                               state_db=self.deps.state.path, abort=self.abort, log=log)
 

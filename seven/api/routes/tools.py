@@ -10,9 +10,10 @@ from ...app import SevenApp
 from ...tools import TOOL_NAME, ToolInUseError
 from ...tools.builtins.code import _health, _trial_run
 from ...tools.builtins.shared import await_run, format_run, start_generated
+from ...tools.bundle import rebundle
 from ..common import api_ctx, err
 from ..deps import get_seven
-from ..models import CallRequest, DefineToolRequest, DisableRequest, ExecRequest
+from ..models import CallRequest, DefineToolRequest, DisableRequest, ExecRequest, RebundleRequest
 
 router = APIRouter()
 
@@ -26,17 +27,26 @@ async def list_tools(seven: Annotated[SevenApp, Depends(get_seven)]):
 async def define_tool(req: DefineToolRequest, seven: Annotated[SevenApp, Depends(get_seven)]):
     if not TOOL_NAME.match(req.name):
         raise err(400, f"name must match {TOOL_NAME.pattern}")
+    pins = []
+    if req.libs:
+        try:
+            pins = seven.libstore.resolve(req.libs)
+        except ValueError as e:
+            raise err(400, str(e))
     try:
-        packages = await seven.runner.install(req.code, req.deps or {}, seven.log)
+        packages = await seven.runner.install(req.code, req.deps or {}, seven.log, skip={p["name"] for p in pins})
     except Exception as e:
         raise err(400, str(e))
     if req.test_args is not None:
-        r = await _trial_run(api_ctx(seven), req.name, req.code, req.test_args, req.timeout_ms)
+        lmap = seven.libstore.libs_map(pins) if pins else None
+        r = await _trial_run(api_ctx(seven), req.name, req.code, req.test_args, req.timeout_ms, lmap)
         if not r.ok:
             raise err(400, f"not saved: the trial run failed\n{format_run(r)}")
     meta = seven.store.save(name=req.name, description=req.description, parameters=req.parameters,
-                            deps=req.deps or {}, packages=packages, source=req.code, timeout_ms=req.timeout_ms)
-    seven.log.info("tool saved", tool=req.name, revision=meta["revision"], source="api")
+                            deps=req.deps or {}, packages=packages, source=req.code, timeout_ms=req.timeout_ms,
+                            libs=pins, test_args=req.test_args)
+    seven.log.info("tool saved", tool=req.name, revision=meta["revision"], source="api",
+                   libs=[p["name"] for p in pins])
     return meta
 
 
@@ -104,6 +114,18 @@ async def start_tool(name: str, req: CallRequest, seven: Annotated[SevenApp, Dep
     handle = start_generated(api_ctx(seven), t, req.args, "async", req.timeout_ms)
     rid = seven.supervisor.runs.add("user", name, handle)
     return {"run": rid}
+
+
+@router.post("/api/tools/{name}/rebundle")
+async def rebundle_tool(name: str, req: RebundleRequest | None = None,
+                        seven: Annotated[SevenApp, Depends(get_seven)] = None):
+    t = seven.store.get(name)
+    if not t:
+        raise err(404, f'no tool named "{name}"')
+    try:
+        return await rebundle(api_ctx(seven), name, req.libs if req else None)
+    except ValueError as e:
+        raise err(400, str(e))
 
 
 @router.post("/api/exec")

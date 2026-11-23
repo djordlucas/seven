@@ -282,6 +282,38 @@ MIGRATIONS = [
       VALUES ('supervisor', 'supervisor', 'The supervisor; message it to control jobs and read system status.', NULL, 'supervisor', 'idle', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
     INSERT OR IGNORE INTO meta (key, value) VALUES ('job_seq', '0');
     """,
+    # 3: generated libraries (libs + per-revision sources) and per-tool pinned
+    #    dependency manifests (tools.libs) plus stored trial args (tools.test_args).
+    """
+    CREATE TABLE IF NOT EXISTS libs (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS lib_revs (
+      name TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      at TEXT NOT NULL,
+      PRIMARY KEY (name, revision)
+    );
+    ALTER TABLE tools ADD COLUMN libs TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE tools ADD COLUMN test_args TEXT;
+    """,
+    # 4: per-agent key/value memory (remember/recall/forget), shown in the Data view.
+    """
+    CREATE TABLE IF NOT EXISTS kv (
+      agent TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      chars INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (agent, key)
+    );
+    """,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS) + 1
@@ -640,6 +672,30 @@ class State:
     def get_output(self, oid: str) -> Output | None:
         r = self.query_one("SELECT * FROM outputs WHERE id = ?", (oid,))
         return dict(r) if r else None
+
+    # ── per-agent key/value memory ──
+
+    def kv_put(self, agent: str, key: str, value: str) -> None:
+        self.execute(
+            "INSERT OR REPLACE INTO kv (agent, key, value, chars, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (agent, key, value, len(value), now_iso()),
+        )
+
+    def kv_get(self, agent: str, key: str) -> dict | None:
+        r = self.query_one("SELECT * FROM kv WHERE agent = ? AND key = ?", (agent, key))
+        return dict(r) if r else None
+
+    def kv_list(self, agent: str | None = None) -> list[dict]:
+        # preview = first 81 chars of the value (callers ellipsize past 80); values stay out of the row otherwise
+        if agent:
+            rows = self.query("SELECT agent, key, chars, updated_at, substr(value, 1, 81) AS preview FROM kv WHERE agent = ? ORDER BY updated_at DESC, key LIMIT 500", (agent,))
+        else:
+            rows = self.query("SELECT agent, key, chars, updated_at, substr(value, 1, 81) AS preview FROM kv ORDER BY updated_at DESC, agent, key LIMIT 500")
+        return [dict(r) for r in rows]
+
+    def kv_delete(self, agent: str, key: str) -> bool:
+        cur = self.execute("DELETE FROM kv WHERE agent = ? AND key = ?", (agent, key))
+        return cur.rowcount > 0
 
     def acquire_lease(self, stale_ms: int = LEASE_STALE_MS) -> str | None:
         def work():

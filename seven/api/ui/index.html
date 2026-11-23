@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,122 +8,258 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>7</text></svg>">
 </head>
 <body>
-<header>
-  <div class="brand">seven<span class="brand-sub">agent control</span></div>
-  <nav>
-    <button data-view="agents" class="nav-btn active">Agents</button>
-    <button data-view="tools" class="nav-btn">Tools</button>
-    <button data-view="runs" class="nav-btn">Runs</button>
-    <button data-view="jobs" class="nav-btn">Jobs</button>
-    <button data-view="skills" class="nav-btn">Skills</button>
-    <button data-view="memory" class="nav-btn">Memory</button>
-    <button data-view="logs" class="nav-btn">Logs</button>
-    <button data-view="config" class="nav-btn">Config</button>
-  </nav>
-  <div id="health" class="health"></div>
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="brand-mark" title="seven">7</span>
+    <nav class="nav">
+      <button data-view="agents" class="nav-btn active">Agents</button>
+      <button data-view="data" class="nav-btn">Data</button>
+      <button data-view="skills" class="nav-btn">Skills</button>
+      <button data-view="tools" class="nav-btn">Tools</button>
+      <button data-view="activity" class="nav-btn">Activity</button>
+      <button data-view="jobs" class="nav-btn">Jobs</button>
+      <button data-view="config" class="nav-btn">System</button>
+    </nav>
+  </div>
+  <div class="brand" title="this instance">
+    <span class="brand-name">seven</span>
+    <span id="instance-name" class="instance-name mono"></span>
+  </div>
+  <div class="topbar-right">
+    <button id="theme-toggle" class="btn icon" title="Switch theme">☀️</button>
+    <span id="sse-dot" class="sse-dot" title="live event stream"></span>
+    <span id="health" class="health mono"></span>
+  </div>
 </header>
-<main>
+
+<main class="content">
+  <!-- ── Agents ─────────────────────────────────────────────────── -->
   <section id="view-agents" class="view active">
-    <div class="agents-layout">
-      <div class="agents-side">
+    <div class="split">
+      <div class="panel agents-side">
         <div class="panel-head">
           <h2>Agents</h2>
           <button id="btn-spawn" class="btn primary">+ New agent</button>
         </div>
         <table class="list" id="agents-table"></table>
       </div>
-      <div class="chat-pane" id="chat-pane">
-        <div class="panel-head">
-          <h2 id="chat-title">No agent selected</h2>
+      <div class="panel chat-pane" id="chat-pane">
+        <div class="panel-head chat-head">
+          <div class="chat-title-wrap">
+            <h2 id="chat-title">No agent selected</h2>
+            <div id="chat-status" class="status-line"></div>
+          </div>
           <div class="actions" id="chat-actions"></div>
         </div>
-        <div id="chat-status" class="status-line"></div>
         <div class="chat-tabs">
-          <button class="btn small tab active" data-tab="chat">Chat</button>
-          <button class="btn small tab" data-tab="inbox">Inbox</button>
-          <button class="btn small tab" data-tab="outbox">Outbox</button>
+          <button class="tab active" data-tab="chat">Conversation</button>
+          <button class="tab" data-tab="inbox">Inbox</button>
+          <button class="tab" data-tab="outbox">Outbox</button>
         </div>
         <div id="mail-pane" class="mail-pane hidden"></div>
         <div id="messages" class="messages"></div>
         <form id="send-form" class="send-form hidden">
           <textarea id="send-input" rows="2" placeholder="Message this agent… (Enter to send, Shift+Enter for newline)"></textarea>
-          <button class="btn primary" type="submit">Send</button>
+          <button id="btn-attach" class="btn icon" type="button" title="Upload a file to the workspace and send its path to this agent">📎</button>
+          <input id="attach-input" type="file" multiple class="hidden">
         </form>
       </div>
     </div>
   </section>
 
+  <!-- ── Tools ──────────────────────────────────────────────────── -->
   <section id="view-tools" class="view">
-    <div class="panel-head">
-      <h2>Generated tools</h2>
-      <div>
-        <button id="btn-exec" class="btn">Run Python</button>
-        <button id="btn-define" class="btn primary">+ Define tool</button>
+    <div class="subtabs">
+      <button class="tab active" data-tools-tab="tools">Tools</button>
+      <button class="tab" data-tools-tab="libs">Libraries</button>
+    </div>
+    <div id="tools-pane">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Generated tools</h2>
+          <div class="actions">
+            <button id="btn-exec" class="btn">Run Python</button>
+            <button id="btn-define" class="btn primary">+ Define tool</button>
+          </div>
+        </div>
+        <table class="list" id="tools-table"></table>
+      </div>
+      <div id="tool-detail" class="panel detail hidden"></div>
+    </div>
+    <div id="libs-pane" class="hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Generated libraries</h2>
+          <div class="actions">
+            <button id="btn-define-lib" class="btn primary">+ Define library</button>
+          </div>
+        </div>
+        <table class="list" id="libs-table"></table>
+      </div>
+      <div id="lib-detail" class="panel detail hidden"></div>
+    </div>
+  </section>
+
+  <!-- ── Data (files + spilled output + agent KV memory) ───────── -->
+  <section id="view-data" class="view">
+    <div class="subtabs">
+      <button class="tab active" data-data-tab="files">Files</button>
+      <button class="tab" data-data-tab="spill">Spill</button>
+      <button class="tab" data-data-tab="kv">KV</button>
+    </div>
+    <div id="data-pane-files">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Workspace files</h2>
+        <div class="actions">
+          <span id="files-crumbs" class="crumbs mono"></span>
+          <button id="btn-files-up" class="btn small" title="Up one level">↑</button>
+          <button id="btn-new-file" class="btn small">+ file</button>
+          <button id="btn-new-dir" class="btn small">+ folder</button>
+          <button id="btn-files-upload" class="btn small">⇪ upload</button>
+          <input id="files-upload-input" type="file" multiple class="hidden">
+          <button id="btn-files-refresh" class="btn small">refresh</button>
+        </div>
+      </div>
+      <table class="list" id="files-table"></table>
+    </div>
+    <div id="file-detail" class="panel detail hidden">
+      <div class="panel-head">
+        <h3 id="file-detail-title" class="mono"></h3>
+        <div class="actions">
+          <span id="file-detail-meta" class="kv"></span>
+          <button id="btn-file-download" class="btn small">download</button>
+          <button id="btn-file-rename" class="btn small">rename</button>
+          <button id="btn-file-delete" class="btn small danger">delete</button>
+          <button id="btn-file-save" class="btn small primary hidden">save</button>
+        </div>
+      </div>
+      <div id="file-preview" class="hidden"></div>
+      <textarea id="file-content" class="file-editor hidden" rows="18" spellcheck="false"></textarea>
+    </div>
+    </div>
+
+    <div id="data-pane-spill" class="hidden">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Spilled output</h2>
+        <button id="btn-refresh-memory" class="btn">Refresh</button>
+      </div>
+      <table class="list" id="memory-table"></table>
+    </div>
+    <div id="memory-detail" class="panel detail hidden"></div>
+    </div>
+
+    <div id="data-pane-kv" class="hidden">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Agent key/value memory</h2>
+        <div class="actions">
+          <input id="kv-agent-filter" placeholder="agent filter" title="show only this agent's keys" style="width:150px">
+          <button id="btn-new-kv" class="btn small primary">+ key</button>
+          <button id="btn-refresh-kv" class="btn small">refresh</button>
+        </div>
+      </div>
+      <table class="list" id="kv-table"></table>
+    </div>
+    <div id="kv-detail" class="panel detail hidden">
+      <div class="panel-head">
+        <h3 id="kv-detail-title" class="mono"></h3>
+        <div class="actions">
+          <span id="kv-detail-meta" class="kv"></span>
+          <button id="btn-kv-delete" class="btn small danger">delete</button>
+          <button id="btn-kv-save" class="btn small primary">save</button>
+        </div>
+      </div>
+      <textarea id="kv-value" class="file-editor" rows="12" spellcheck="false" placeholder="value"></textarea>
+    </div>
+    </div>
+  </section>
+
+  <!-- ── Activity (runs + logs) ─────────────────────────────────── -->
+  <section id="view-activity" class="view">
+    <div class="subtabs">
+      <button class="tab active" data-subtab="runs">Runs</button>
+      <button class="tab" data-subtab="logs">Logs</button>
+    </div>
+    <div id="subtab-runs">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Background runs</h2>
+          <button id="btn-refresh-runs" class="btn">Refresh</button>
+        </div>
+        <table class="list" id="runs-table"></table>
+      </div>
+      <div id="run-detail" class="panel detail hidden"></div>
+    </div>
+    <div id="subtab-logs" class="hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Logs</h2>
+          <div class="actions log-filters">
+            <input id="log-agent" placeholder="agent" title="agent">
+            <select id="log-level"><option value="">any level</option><option>debug</option><option>info</option><option>warn</option><option>error</option></select>
+            <input id="log-grep" placeholder="grep" title="grep">
+            <input id="log-tail" type="number" value="200" title="tail (0 = all)">
+            <label class="check"><input type="checkbox" id="log-follow"> follow</label>
+            <button id="btn-logs" class="btn">Apply</button>
+          </div>
+        </div>
+        <div id="logs-table" class="logs"></div>
       </div>
     </div>
-    <table class="list" id="tools-table"></table>
-    <div id="tool-detail" class="detail hidden"></div>
   </section>
 
-  <section id="view-runs" class="view">
-    <div class="panel-head"><h2>Background runs</h2><button id="btn-refresh-runs" class="btn">Refresh</button></div>
-    <table class="list" id="runs-table"></table>
-    <div id="run-detail" class="detail hidden"></div>
-  </section>
-
+  <!-- ── Jobs ───────────────────────────────────────────────────── -->
   <section id="view-jobs" class="view">
-    <div class="panel-head">
-      <h2>Jobs (supervisor-driven autonomous work)</h2>
-      <div><label><input type="checkbox" id="jobs-all"> show finished</label> <button id="btn-new-job" class="btn primary">+ New job</button></div>
-    </div>
-    <table class="list" id="jobs-table"></table>
-    <div id="job-detail" class="detail hidden"></div>
-  </section>
-
-  <section id="view-skills" class="view">
-    <div class="panel-head">
-      <h2>Skills (tool bundles)</h2>
-      <button id="btn-new-skill" class="btn primary">+ New skill</button>
-    </div>
-    <table class="list" id="skills-table"></table>
-    <div id="skill-detail" class="detail hidden"></div>
-  </section>
-
-  <section id="view-memory" class="view">
-    <div class="panel-head"><h2>Spilled output memory</h2><button id="btn-refresh-memory" class="btn">Refresh</button></div>
-    <table class="list" id="memory-table"></table>
-    <div id="memory-detail" class="detail hidden"></div>
-  </section>
-
-  <section id="view-logs" class="view">
-    <div class="panel-head">
-      <h2>Logs</h2>
-      <div class="log-filters">
-        <input id="log-agent" placeholder="agent" size="8">
-        <select id="log-level"><option value="">any level</option><option>debug</option><option>info</option><option>warn</option><option>error</option></select>
-        <input id="log-grep" placeholder="grep" size="12">
-        <input id="log-tail" type="number" value="200" size="6" title="tail">
-        <label><input type="checkbox" id="log-follow"> follow</label>
-        <button id="btn-logs" class="btn">Apply</button>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Jobs</h2>
+        <div class="actions">
+          <label class="check"><input type="checkbox" id="jobs-all"> show finished</label>
+          <button id="btn-new-job" class="btn primary">+ New job</button>
+        </div>
       </div>
+      <table class="list" id="jobs-table"></table>
     </div>
-    <div id="logs-table" class="logs"></div>
+    <div id="job-detail" class="panel detail hidden"></div>
   </section>
 
+  <!-- ── Skills ─────────────────────────────────────────────────── -->
+  <section id="view-skills" class="view">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Skills</h2>
+        <button id="btn-new-skill" class="btn primary">+ New skill</button>
+      </div>
+      <table class="list" id="skills-table"></table>
+    </div>
+    <div id="skill-detail" class="panel detail hidden"></div>
+  </section>
+
+  <!-- ── System ─────────────────────────────────────────────────── -->
   <section id="view-config" class="view">
-    <div class="panel-head"><h2>Config & health</h2></div>
-    <table class="list" id="config-table"></table>
+    <div class="panel">
+      <div class="panel-head"><h2>Config &amp; health</h2></div>
+      <table class="list" id="config-table"></table>
+    </div>
   </section>
 </main>
 
+<div id="tooltip" class="tooltip hidden"></div>
+
 <div id="modal-backdrop" class="modal-backdrop hidden">
-  <div class="modal">
-    <div class="panel-head"><h3 id="modal-title"></h3><button id="modal-close" class="btn">✕</button></div>
-    <div id="modal-body"></div>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="panel-head modal-head">
+      <h3 id="modal-title"></h3>
+      <button id="modal-close" class="btn icon" title="Close">✕</button>
+    </div>
+    <div id="modal-body" class="modal-body"></div>
     <div class="modal-actions" id="modal-actions"></div>
   </div>
 </div>
-<div id="toast" class="toast hidden"></div>
+<div id="toasts" class="toasts"></div>
+<script src="/ui/markdown.js"></script>
 <script src="/ui/app.js"></script>
 </body>
 </html>

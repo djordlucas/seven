@@ -62,6 +62,10 @@ class Config:
         return self.home / "tools"
 
     @property
+    def libs_dir(self) -> Path:
+        return self.home / "libs"
+
+    @property
     def tmp_dir(self) -> Path:
         return self.home / "tmp"
 
@@ -135,7 +139,7 @@ def load_config(env: dict | None = None) -> Config:
         spill_chars=_int(env.get("SEVEN_SPILL_CHARS"), 2000, allow_zero=True),
         memory_dir=Path(env.get("SEVEN_MEMORY_DIR") or ".seven/memory"),
         core_tools=tuple(
-            (env.get("SEVEN_CORE_TOOLS") or "run_python,define_tool,read_tool,delegate,send_message,wait_message,spawn_agent,read_memory").split(",")
+            (env.get("SEVEN_CORE_TOOLS") or "run_python,define_tool,read_tool,delegate,send_message,wait_message,spawn_agent,read_memory,remember,recall,forget").split(",")
         ),
         tool_discovery=env.get("SEVEN_TOOL_DISCOVERY", "1") != "0",
         delegate_timeout_s=_int(env.get("SEVEN_DELEGATE_TIMEOUT_S"), 600),

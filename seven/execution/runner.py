@@ -94,7 +94,10 @@ class Runner:
         self._install_lock = asyncio.Lock()
         self._live: set[asyncio.Task] = set()
 
-    async def install(self, source: str, deps: dict[str, str] | None, log: Logger) -> list[dict]:
+    async def install(self, source: str, deps: dict[str, str] | None, log: Logger,
+                      skip: set[str] | frozenset = frozenset()) -> list[dict]:
+        """Install pip deps for the imports in `source`. Names in `skip` (bundled
+        generated libraries) are served by the child's import hook, not pip."""
         try:
             compile(source, "<tool>", "exec")
         except SyntaxError as err:
@@ -103,7 +106,7 @@ class Runner:
         stdlib = getattr(sys, "stdlib_module_names", frozenset())
         specs: list[str] = []
         for name in sorted(wanted):
-            if name in stdlib or name == "seven":
+            if name in stdlib or name == "seven" or name in skip:
                 continue
             spec = (deps or {}).get(name, "latest")
             if spec and spec != "latest" and not any(c in spec for c in "<>=!~"):
@@ -113,11 +116,11 @@ class Runner:
             specs.append(spec or name)
             if not self._available(name):
                 specs[-1] = spec or name
-        missing = [s for s, n in zip(specs, sorted(wanted)) if n not in stdlib and n != "seven" and not self._available(n)]
+        missing = [s for s, n in zip(specs, sorted(wanted)) if n not in stdlib and n != "seven" and n not in skip and not self._available(n)]
         installed: list[dict] = []
         if missing:
             async with self._install_lock:
-                still = [s for s, n in zip(specs, sorted(wanted)) if n not in stdlib and n != "seven" and not self._available(n)]
+                still = [s for s, n in zip(specs, sorted(wanted)) if n not in stdlib and n != "seven" and n not in skip and not self._available(n)]
                 if still:
                     self.site_packages.mkdir(parents=True, exist_ok=True)
                     proc = await asyncio.create_subprocess_exec(
@@ -144,29 +147,31 @@ class Runner:
             return False
 
     def start_file(self, file: str | Path, args: object = None, timeout_ms: int | None = None,
-                   log: Logger = noop_logger) -> RunHandle:
+                   log: Logger = noop_logger, libs: dict[str, str] | None = None) -> RunHandle:
         handle = RunHandle(log)
-        task = asyncio.create_task(self._execute(handle, str(file), args, timeout_ms or self.timeout_ms, log))
+        task = asyncio.create_task(self._execute(handle, str(file), args, timeout_ms or self.timeout_ms, log, libs))
         self._live.add(task)
         task.add_done_callback(self._live.discard)
         return handle
 
     def start_eval(self, code: str, *, args: object = None, deps: dict[str, str] | None = None,
-                   timeout_ms: int | None = None, log: Logger = noop_logger) -> RunHandle:
+                   timeout_ms: int | None = None, log: Logger = noop_logger,
+                   libs: dict[str, str] | None = None) -> RunHandle:
         handle = RunHandle(log)
-        task = asyncio.create_task(self._eval(handle, code, args, deps, timeout_ms or self.timeout_ms, log))
+        task = asyncio.create_task(self._eval(handle, code, args, deps, timeout_ms or self.timeout_ms, log, libs))
         self._live.add(task)
         task.add_done_callback(self._live.discard)
         return handle
 
     async def run_file(self, file: str | Path, args: object = None, timeout_ms: int | None = None,
-                       log: Logger = noop_logger) -> RunResult:
-        handle = self.start_file(file, args, timeout_ms, log)
+                       log: Logger = noop_logger, libs: dict[str, str] | None = None) -> RunResult:
+        handle = self.start_file(file, args, timeout_ms, log, libs)
         return await handle.done
 
-    async def _eval(self, handle: RunHandle, code: str, args, deps, timeout_ms: int, log: Logger) -> None:
+    async def _eval(self, handle: RunHandle, code: str, args, deps, timeout_ms: int, log: Logger,
+                    libs: dict[str, str] | None = None) -> None:
         try:
-            await self.install(code, deps, log)
+            await self.install(code, deps, log, skip=set(libs or ()))
         except Exception as err:
             handle._state = "done"
             handle.done.set_result(RunResult(ok=False, error=str(err), logs=[], duration_ms=0))
@@ -176,12 +181,13 @@ class Runner:
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(code)
-            await self._execute(handle, path, args, timeout_ms, log)
+            await self._execute(handle, path, args, timeout_ms, log, libs)
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(path)
 
-    async def _execute(self, handle: RunHandle, file: str, args: object, timeout_ms: int, log: Logger) -> None:
+    async def _execute(self, handle: RunHandle, file: str, args: object, timeout_ms: int, log: Logger,
+                       libs: dict[str, str] | None = None) -> None:
         started = time.time()
         proc: asyncio.subprocess.Process | None = None
         rpc_w = -1
@@ -197,7 +203,8 @@ class Runner:
         try:
             rpc_r, rpc_w = os.pipe()
             req = {"file": file, "args": args, "workspace": self.cwd, "home": str(self.home),
-                   "site_packages": str(self.site_packages), "memory_mb": self.memory_mb, "rpc_fd": rpc_w}
+                   "site_packages": str(self.site_packages), "memory_mb": self.memory_mb, "rpc_fd": rpc_w,
+                   "libs": libs or {}}
             env = dict(os.environ)
             env["PYTHONPATH"] = os.pathsep.join([str(Path(__file__).resolve().parent.parent), env.get("PYTHONPATH", "")]).rstrip(os.pathsep)
             proc = await asyncio.create_subprocess_exec(
