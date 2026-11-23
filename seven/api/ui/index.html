@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,22 +9,22 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">
-    <span class="brand-mark">7</span>
-    <span class="brand-name">seven</span>
-    <span class="brand-sub">agent control</span>
-  </div>
   <nav class="nav">
     <button data-view="agents" class="nav-btn active">Agents</button>
     <button data-view="tools" class="nav-btn">Tools</button>
-    <button data-view="runs" class="nav-btn">Runs</button>
+    <button data-view="activity" class="nav-btn">Activity</button>
     <button data-view="jobs" class="nav-btn">Jobs</button>
     <button data-view="skills" class="nav-btn">Skills</button>
     <button data-view="memory" class="nav-btn">Memory</button>
-    <button data-view="logs" class="nav-btn">Logs</button>
     <button data-view="config" class="nav-btn">System</button>
   </nav>
+  <div class="brand" title="seven — this instance">
+    <span class="brand-mark">7</span>
+    <span class="brand-name">seven</span>
+    <span id="instance-name" class="instance-name mono"></span>
+  </div>
   <div class="topbar-right">
+    <button id="theme-toggle" class="btn icon" title="Switch theme">☀️</button>
     <span id="sse-dot" class="sse-dot" title="live event stream"></span>
     <span id="health" class="health mono"></span>
   </div>
@@ -79,16 +79,38 @@
     <div id="tool-detail" class="panel detail hidden"></div>
   </section>
 
-  <!-- ── Runs ───────────────────────────────────────────────────── -->
-  <section id="view-runs" class="view">
-    <div class="panel">
-      <div class="panel-head">
-        <h2>Background runs</h2>
-        <button id="btn-refresh-runs" class="btn">Refresh</button>
-      </div>
-      <table class="list" id="runs-table"></table>
+  <!-- ── Activity (runs + logs) ─────────────────────────────────── -->
+  <section id="view-activity" class="view">
+    <div class="subtabs">
+      <button class="tab active" data-subtab="runs">Runs</button>
+      <button class="tab" data-subtab="logs">Logs</button>
     </div>
-    <div id="run-detail" class="panel detail hidden"></div>
+    <div id="subtab-runs">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Background runs</h2>
+          <button id="btn-refresh-runs" class="btn">Refresh</button>
+        </div>
+        <table class="list" id="runs-table"></table>
+      </div>
+      <div id="run-detail" class="panel detail hidden"></div>
+    </div>
+    <div id="subtab-logs" class="hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Logs</h2>
+          <div class="actions log-filters">
+            <input id="log-agent" placeholder="agent" title="agent">
+            <select id="log-level"><option value="">any level</option><option>debug</option><option>info</option><option>warn</option><option>error</option></select>
+            <input id="log-grep" placeholder="grep" title="grep">
+            <input id="log-tail" type="number" value="200" title="tail (0 = all)">
+            <label class="check"><input type="checkbox" id="log-follow"> follow</label>
+            <button id="btn-logs" class="btn">Apply</button>
+          </div>
+        </div>
+        <div id="logs-table" class="logs"></div>
+      </div>
+    </div>
   </section>
 
   <!-- ── Jobs ───────────────────────────────────────────────────── -->
@@ -130,24 +152,6 @@
     <div id="memory-detail" class="panel detail hidden"></div>
   </section>
 
-  <!-- ── Logs ───────────────────────────────────────────────────── -->
-  <section id="view-logs" class="view">
-    <div class="panel">
-      <div class="panel-head">
-        <h2>Logs</h2>
-        <div class="actions log-filters">
-          <input id="log-agent" placeholder="agent" title="agent">
-          <select id="log-level"><option value="">any level</option><option>debug</option><option>info</option><option>warn</option><option>error</option></select>
-          <input id="log-grep" placeholder="grep" title="grep">
-          <input id="log-tail" type="number" value="200" title="tail (0 = all)">
-          <label class="check"><input type="checkbox" id="log-follow"> follow</label>
-          <button id="btn-logs" class="btn">Apply</button>
-        </div>
-      </div>
-      <div id="logs-table" class="logs"></div>
-    </div>
-  </section>
-
   <!-- ── System ─────────────────────────────────────────────────── -->
   <section id="view-config" class="view">
     <div class="panel">
@@ -156,6 +160,8 @@
     </div>
   </section>
 </main>
+
+<div id="tooltip" class="tooltip hidden"></div>
 
 <div id="modal-backdrop" class="modal-backdrop hidden">
   <div class="modal" role="dialog" aria-modal="true">

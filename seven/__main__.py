@@ -20,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
     p_serve = sub.add_parser("serve", help="run the API (and every agent) until SIGINT/SIGTERM")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.add_argument("--reload", action="store_true",
+                         help="watch the seven package and restart on changes (development in a container)")
 
     p_agents = sub.add_parser("agents", help="list agents, with inbox counts; does not run agents")
     p_agents.add_argument("--all", action="store_true", help="include finished, failed and stopped agents")
@@ -44,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config()
 
     if args.cmd == "serve":
-        return _serve(cfg, args.host, args.port)
+        return _serve(cfg, args.host, args.port, args.reload)
     if args.cmd == "agents":
         return _agents(cfg, args.all)
     if args.cmd == "send":
@@ -56,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
-def _serve(cfg, host: str, port: int) -> int:
+def _serve(cfg, host: str, port: int, reload: bool = False) -> int:
     state = State(cfg.state_db)
     err = state.acquire_lease()
     state.release_lease()
@@ -66,6 +68,16 @@ def _serve(cfg, host: str, port: int) -> int:
         return 1
     import uvicorn
 
+    if reload:
+        # Import-string form so uvicorn's reloader can restart the child on
+        # source changes; watch the installed package, wherever it lives.
+        from pathlib import Path
+
+        import seven as pkg
+
+        uvicorn.run("seven.api.app:create_app", factory=True, host=host, port=port,
+                    reload=True, reload_dirs=[str(Path(pkg.__file__).resolve().parent)], log_level="warning")
+        return 0
     from .api import create_app
     from .app import SevenApp
     uvicorn.run(create_app(SevenApp(cfg)), host=host, port=port, log_level="warning")

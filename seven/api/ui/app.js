@@ -7,6 +7,7 @@ const $$ = (sel) => [...document.querySelectorAll(sel)];
 
 const state = {
   view: "agents",
+  subtab: "runs",
   agents: [],
   selectedAgent: null,
   mailTab: "chat",
@@ -126,11 +127,10 @@ function confirmModal(title, text, onYes) {
 const loaders = {
   agents: null, // loaded explicitly
   tools: () => loadTools(),
-  runs: () => loadRuns(),
+  activity: () => { loadRuns(); if (state.subtab === "logs") loadLogs(); },
   jobs: () => loadJobs(),
   skills: () => loadSkills(),
   memory: () => loadMemory(),
-  logs: () => loadLogs(),
   config: () => loadConfig(),
 };
 
@@ -142,12 +142,41 @@ $$(".nav-btn").forEach((b) => (b.onclick = () => {
   else loaders[state.view]?.();
 }));
 
+$$(".subtabs .tab").forEach((b) => (b.onclick = () => {
+  $$(".subtabs .tab").forEach((x) => x.classList.toggle("active", x === b));
+  state.subtab = b.dataset.subtab;
+  $("#subtab-runs").classList.toggle("hidden", state.subtab !== "runs");
+  $("#subtab-logs").classList.toggle("hidden", state.subtab !== "logs");
+  if (state.subtab === "runs") loadRuns();
+  else loadLogs();
+}));
+
+/* ── theme ─────────────────────────────────────────────────── */
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  $("#theme-toggle").textContent = theme === "dark" ? "☀️" : "🌙";
+  $("#theme-toggle").title = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+  try { localStorage.setItem("seven-theme", theme); } catch { /* private mode */ }
+}
+$("#theme-toggle").onclick = () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+};
+(function initTheme() {
+  let theme;
+  try { theme = localStorage.getItem("seven-theme"); } catch { /* ignore */ }
+  if (!theme) theme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  applyTheme(theme);
+})();
+
 /* ── health + live events ──────────────────────────────────── */
 
 async function refreshHealth() {
   try {
     const h = await api("GET", "/api/health");
-    $("#health").textContent = `v${h.version} · ${h.active_agents} agents · up ${Math.round(h.uptime_s)}s · ${h.workspace}`;
+    $("#health").textContent = `v${h.version} · ${h.active_agents} agents · up ${Math.round(h.uptime_s)}s`;
+    const name = String(h.workspace || "").replace(/\/+$/, "").split("/").pop() || "instance";
+    $("#instance-name").textContent = name;
   } catch {
     $("#health").textContent = "api unreachable";
   }
@@ -190,7 +219,7 @@ function openEvents() {
       }
       if (state.view === "jobs") debounce("jobs", loadJobs, 400);
       if (state.view === "skills") debounce("skills", loadSkills, 400);
-      if (state.view === "runs") debounce("runs", loadRuns, 400);
+      if (state.view === "activity") debounce("runs", loadRuns, 400);
     });
   }
 }
@@ -215,15 +244,63 @@ function renderAgents() {
     return;
   }
   t.innerHTML =
-    `<tr><th>agent</th><th>mode</th><th>status</th><th>inbox</th><th>description</th></tr>` +
+    `<tr><th>agent</th><th>mode</th><th>status</th><th>inbox</th></tr>` +
     state.agents.map((a) => `<tr class="clickable ${a.id === state.selectedAgent ? "selected" : ""}" data-id="${esc(a.id)}">
       <td><span class="mono">${esc(a.id)}</span> <span class="kv">“${esc(a.name)}”</span>${a.busy ? ' <span class="badge running">busy</span>' : ""}</td>
       <td>${esc(a.mode)}</td>
       <td>${badge(a.status)}</td>
       <td class="mono">${a.inbox_pending}</td>
-      <td title="${esc(a.description)}">${esc(a.description)}</td>
     </tr>`).join("");
   $$("#agents-table tr.clickable").forEach((tr) => (tr.onclick = () => selectAgent(tr.dataset.id)));
+}
+
+/* Floating detail box for a roster row, shown after a short hover delay.
+   Delegated on the table so the 3s re-render never cancels a hover. */
+let tooltipTimer = null;
+let tooltipAgent = null;
+let hoverRowId = null;
+$("#agents-table").addEventListener("mouseover", (e) => {
+  const tr = e.target.closest("tr.clickable");
+  const id = tr?.dataset.id ?? null;
+  if (id === hoverRowId) return; // same row, even after a re-render
+  hoverRowId = id;
+  if (!tr) { disarmTooltip(); return; }
+  const a = state.agents.find((x) => x.id === id);
+  if (a) armTooltip(a, e);
+});
+$("#agents-table").addEventListener("mouseleave", () => { hoverRowId = null; disarmTooltip(); });
+$("#agents-table").addEventListener("mousemove", moveTooltip);
+
+function armTooltip(a, e) {
+  disarmTooltip();
+  tooltipAgent = a;
+  tooltipTimer = setTimeout(() => {
+    if (tooltipAgent !== a) return;
+    showTooltip(a, e.clientX, e.clientY);
+  }, 900);
+}
+function disarmTooltip() {
+  if (tooltipTimer) { clearTimeout(tooltipTimer); tooltipTimer = null; }
+  tooltipAgent = null;
+  $("#tooltip").classList.add("hidden");
+}
+function moveTooltip(e) {
+  if (!$("#tooltip").classList.contains("hidden") && tooltipAgent) showTooltip(tooltipAgent, e.clientX, e.clientY);
+}
+function showTooltip(a, x, y) {
+  const t = $("#tooltip");
+  t.innerHTML = `
+    <div class="tt-title">${esc(a.id)} “${esc(a.name)}”</div>
+    <div class="tt-row">mode ${esc(a.mode)} · status ${esc(a.status)}${a.busy ? " · busy" : ""} · inbox ${a.inbox_pending} (${a.inbox_tasks} tasks, ${a.inbox_messages} messages)</div>
+    ${a.parent ? `<div class="tt-row">spawned by ${esc(a.parent)}</div>` : ""}
+    <div class="tt-row">created ${esc(fmtTime(a.created_at))}</div>
+    <div class="tt-desc">${esc(a.description || "no description")}</div>`;
+  t.classList.remove("hidden");
+  const r = t.getBoundingClientRect();
+  const px = Math.min(Math.max(8, x + 14), window.innerWidth - r.width - 8);
+  const py = Math.min(Math.max(8, y + 16), window.innerHeight - r.height - 8);
+  t.style.left = `${px}px`;
+  t.style.top = `${py}px`;
 }
 
 async function selectAgent(id) {
@@ -523,7 +600,7 @@ function toolCallModal(name, mode) {
       } else {
         const r = await api("POST", `/api/tools/${name}/start`, { args, timeout_ms });
         toast(`started run ${r.run}`, true);
-        if (state.view !== "runs") $(".nav-btn[data-view='runs']").click();
+        if (state.view !== "activity") $(".nav-btn[data-view='activity']").click();
         else loadRuns();
       }
     } },
@@ -967,7 +1044,7 @@ loadAgents();
 setInterval(() => {
   refreshHealth();
   if (state.view === "agents") loadAgents();
-  else if (state.view === "runs") loadRuns();
+  else if (state.view === "activity") { loadRuns(); if (state.subtab === "logs" && state.logsFollow) loadLogs(); }
   else if (state.view === "jobs") loadJobs();
   else if (state.view === "skills") loadSkills();
   else if (state.view === "memory") loadMemory();
