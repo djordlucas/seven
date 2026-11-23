@@ -249,7 +249,7 @@ function renderAgents() {
   t.innerHTML =
     `<tr><th>agent</th><th>mode</th><th>status</th><th>inbox</th></tr>` +
     state.agents.map((a) => `<tr class="clickable ${a.id === state.selectedAgent ? "selected" : ""}" data-id="${esc(a.id)}">
-      <td><span class="mono">${esc(a.id)}</span> <span class="kv">“${esc(a.name)}”</span>${a.busy ? ' <span class="badge running">busy</span>' : ""}</td>
+      <td><span class="mono">${esc(a.id)}</span> <span class="kv">“${esc(a.name)}”</span>${a.busy ? ' <span class="badge running">busy</span>' : ""}${a.description ? `<div class="row-desc">${esc(a.description)}</div>` : ""}</td>
       <td>${esc(a.mode)}</td>
       <td>${badge(a.status)}</td>
       <td class="mono">${a.inbox_pending}</td>

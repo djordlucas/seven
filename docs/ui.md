@@ -33,3 +33,4 @@ stay raw monospace in a `<pre>`. |
 | No build step | The UI is hand-written JS served as static files; there is no bundler or framework to update. |
 | Polling + SSE | Agent and run lists poll every few seconds; the open conversation streams over SSE. |
 | Single workspace | The UI shows the workspace of the one server it is served by. |
+| Responsive | Below 1100px the agents view stacks; on phones (≤760px) the top bar wraps to two rows (brand + controls, then a scrollable nav), wide tables drop their secondary columns, the send button goes full-width, and modals/forms go single-column. On touch devices the hover tooltip is replaced by an inline description under the agent name. |
