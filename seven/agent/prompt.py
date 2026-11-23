@@ -23,6 +23,7 @@ def system_prompt(*, workspace: str, self: dict, tools: list[dict], runs: list[s
         listing = "\n".join(f'- {s["name"]}{" (loaded)" if s["name"] in loaded_skills else ""}: {s["description"]} [tools: {", ".join(s["tools"]) or "none"}]' for s in skills)
         skills_sec = f"\n\n## Skills\n\nSkills bundle tools with standing instructions. Yours are not all loaded: list_skills shows them, load_skill loads one (its tools become callable and its instructions apply from your next step), unload_skill removes it.\n{listing}"
     discovery_sec = ("\n\n## Your tool list is small on purpose\n\nOnly core tools and the tools of your loaded skills are in your tool list. Use list_tools to see everything (built-ins and generated tools) and describe_tool to add one to your tool list — it stays callable from your next step. Long tool output is not put in your context whole: it is saved to memory and the result tells you the id; read it in chunks with read_memory(id, from, to).\n"
+                     "\n## Your own memory\n\nSmall durable facts belong in your key/value memory, which persists across restarts: remember(key, value) saves, recall(key) reads (recall() lists your keys), forget(key) deletes. Keys are per-agent.\n"
                      "\n## Delegation\n\nFor long or independent sub-tasks, delegate to a sub-agent instead of doing everything yourself: delegate(task, instructions?) returns only the sub-agent's final answer, keeping your context small.")
 
     runs_sec = (

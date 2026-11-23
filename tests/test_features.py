@@ -199,3 +199,25 @@ async def test_skill_crud_and_delete_protection(started_env):
     await builtins()["delete_skill"].run({"name": "math"}, ctx)
     assert env.state.get_skill("math") is None
     assert "math" not in env.state.get_agent(ROOT_ID)["loaded_skills"]
+
+
+async def test_remember_recall_forget_builtins(started_env):
+    env = started_env
+    b = builtins()
+    assert {"remember", "recall", "forget"} <= set(b)
+    ctx = make_ctx(env, "a7")
+    out = await b["remember"].run({"key": "todo", "value": "write tests"}, ctx)
+    assert "remembered todo" in out
+    assert env.state.kv_get("a7", "todo")["value"] == "write tests"
+    assert "bad key" in await b["remember"].run({"key": "bad key", "value": "x"}, ctx)
+    assert "too large" in await b["remember"].run({"key": "big", "value": "x" * 70000}, ctx)
+    out = await b["recall"].run({"key": "todo"}, ctx)
+    assert "write tests" in out
+    out = await b["recall"].run({}, ctx)
+    assert "1 key(s)" in out and "todo" in out
+    # keys are per-agent
+    other = make_ctx(env, "a8")
+    assert (await b["recall"].run({"key": "todo"}, other)).startswith("error:")
+    assert "forgot todo" in await b["forget"].run({"key": "todo"}, ctx)
+    assert env.state.kv_get("a7", "todo") is None
+    assert (await b["forget"].run({"key": "todo"}, ctx)).startswith("error:")

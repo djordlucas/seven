@@ -54,6 +54,10 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `POST /api/skills/{name}/unload?agent=a1` | Unload it from one agent. |
 | `GET /api/memory` | Spilled outputs, newest first: id, agent, tool, path, chars, lines. |
 | `GET /api/memory/{oid}?offset=&limit=` | One spilled output as a character window: `chunk`, `total_chars`, `next_offset`. |
+| `GET /api/kv?agent=` | Per-agent key/value memory entries (newest first): agent, key, chars, updated_at — values omitted. |
+| `GET /api/kv/{agent}/{key}` | One entry including `value`. 404 if missing. |
+| `PUT /api/kv/{agent}/{key}` | Set/overwrite: `{"value"}` (64 KB cap → 413). Keys are 1-64 chars of `[A-Za-z0-9_.-]`. Emits `kv_changed`. |
+| `DELETE /api/kv/{agent}/{key}` | Delete one entry; 404 if missing. Emits `kv_changed`. |
 | `GET /api/libs` | Generated libraries with revision and dependent-tool count. |
 | `POST /api/libs` | Define one: `name`, `description`, `code`. Each save is a new revision; 400 on a bad name or syntax error. |
 | `GET /api/libs/{name}` | One library: meta, source, and `dependents` (tool, tool revision, pinned lib revision). |
@@ -103,6 +107,7 @@ one agent's events (plus messages to or from it). Event types:
 | `spawned` / `finished` | An agent was spawned / ended: `{type, agent, …}`. |
 | `job_started` / `job_updated` / `job_finished` | A job started, changed status, or ended: `{type, job, kind?, status, detail?}`. |
 | `skill_defined` / `skill_deleted` / `skill_loaded` / `skill_unloaded` | A skill changed: `{type, skill, tools?|agent?}`. |
+| `kv_changed` | A key/value memory entry was set or deleted: `{type, agent, key, op}`. |
 
 ```bash
 curl -N "http://127.0.0.1:8000/api/events?agent=seven"

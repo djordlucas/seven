@@ -13,10 +13,9 @@
     <span class="brand-mark" title="seven">7</span>
     <nav class="nav">
       <button data-view="agents" class="nav-btn active">Agents</button>
-      <button data-view="memory" class="nav-btn">Memory</button>
+      <button data-view="data" class="nav-btn">Data</button>
       <button data-view="skills" class="nav-btn">Skills</button>
       <button data-view="tools" class="nav-btn">Tools</button>
-      <button data-view="files" class="nav-btn">Files</button>
       <button data-view="activity" class="nav-btn">Activity</button>
       <button data-view="jobs" class="nav-btn">Jobs</button>
       <button data-view="config" class="nav-btn">System</button>
@@ -101,11 +100,17 @@
     </div>
   </section>
 
-  <!-- ── Files (workspace file manager) ────────────────────────── -->
-  <section id="view-files" class="view">
+  <!-- ── Data (files + spilled output + agent KV memory) ───────── -->
+  <section id="view-data" class="view">
+    <div class="subtabs">
+      <button class="tab active" data-data-tab="files">Files</button>
+      <button class="tab" data-data-tab="spill">Spill</button>
+      <button class="tab" data-data-tab="kv">KV</button>
+    </div>
+    <div id="data-pane-files">
     <div class="panel">
       <div class="panel-head">
-        <h2>Files</h2>
+        <h2>Workspace files</h2>
         <div class="actions">
           <span id="files-crumbs" class="crumbs mono"></span>
           <button id="btn-files-up" class="btn small" title="Up one level">↑</button>
@@ -131,6 +136,43 @@
       </div>
       <div id="file-preview" class="hidden"></div>
       <textarea id="file-content" class="file-editor hidden" rows="18" spellcheck="false"></textarea>
+    </div>
+    </div>
+
+    <div id="data-pane-spill" class="hidden">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Spilled output</h2>
+        <button id="btn-refresh-memory" class="btn">Refresh</button>
+      </div>
+      <table class="list" id="memory-table"></table>
+    </div>
+    <div id="memory-detail" class="panel detail hidden"></div>
+    </div>
+
+    <div id="data-pane-kv" class="hidden">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Agent key/value memory</h2>
+        <div class="actions">
+          <input id="kv-agent-filter" placeholder="agent filter" title="show only this agent's keys" style="width:150px">
+          <button id="btn-new-kv" class="btn small primary">+ key</button>
+          <button id="btn-refresh-kv" class="btn small">refresh</button>
+        </div>
+      </div>
+      <table class="list" id="kv-table"></table>
+    </div>
+    <div id="kv-detail" class="panel detail hidden">
+      <div class="panel-head">
+        <h3 id="kv-detail-title" class="mono"></h3>
+        <div class="actions">
+          <span id="kv-detail-meta" class="kv"></span>
+          <button id="btn-kv-delete" class="btn small danger">delete</button>
+          <button id="btn-kv-save" class="btn small primary">save</button>
+        </div>
+      </div>
+      <textarea id="kv-value" class="file-editor" rows="12" spellcheck="false" placeholder="value"></textarea>
+    </div>
     </div>
   </section>
 
@@ -193,18 +235,6 @@
       <table class="list" id="skills-table"></table>
     </div>
     <div id="skill-detail" class="panel detail hidden"></div>
-  </section>
-
-  <!-- ── Memory ─────────────────────────────────────────────────── -->
-  <section id="view-memory" class="view">
-    <div class="panel">
-      <div class="panel-head">
-        <h2>Spilled output memory</h2>
-        <button id="btn-refresh-memory" class="btn">Refresh</button>
-      </div>
-      <table class="list" id="memory-table"></table>
-    </div>
-    <div id="memory-detail" class="panel detail hidden"></div>
   </section>
 
   <!-- ── System ─────────────────────────────────────────────────── -->

@@ -1,5 +1,5 @@
 /* seven UI — single-page vanilla JS, no build step.
- * Views: agents (live chat), tools, runs, jobs, skills, memory, logs, system.
+ * Views: agents (live chat), data (files / spill / kv), skills, tools, activity, jobs, system.
  * Data: REST under /api plus one global SSE stream from /api/events. */
 
 const $ = (sel) => document.querySelector(sel);
@@ -8,6 +8,7 @@ const $$ = (sel) => [...document.querySelectorAll(sel)];
 const state = {
   view: "agents",
   subtab: "runs",
+  dataTab: "files",
   agents: [],
   selectedAgent: null,
   mailTab: "chat",
@@ -19,6 +20,8 @@ const state = {
   jobs: [],
   skills: [],
   memory: [],
+  kv: [],
+  kvSel: null,
   filesPath: "",
   fileSel: null,
   logsFollow: false,
@@ -173,13 +176,18 @@ function confirmModal(title, text, onYes) {
 const loaders = {
   agents: null, // loaded explicitly
   tools: () => { loadTools(); loadLibs(); },
-  files: () => loadFiles(),
+  data: () => loadDataTab(),
   activity: () => { loadRuns(); if (state.subtab === "logs") loadLogs(); },
   jobs: () => loadJobs(),
   skills: () => loadSkills(),
-  memory: () => loadMemory(),
   config: () => loadConfig(),
 };
+
+function loadDataTab() {
+  if (state.dataTab === "spill") loadMemory();
+  else if (state.dataTab === "kv") loadKV();
+  else loadFiles();
+}
 
 $$(".nav-btn").forEach((b) => (b.onclick = () => {
   state.view = b.dataset.view;
@@ -204,6 +212,16 @@ $$(".subtabs .tab[data-subtab]").forEach((b) => (b.onclick = () => {
   $("#subtab-logs").classList.toggle("hidden", state.subtab !== "logs");
   if (state.subtab === "runs") loadRuns();
   else loadLogs();
+}));
+
+/* Data view sub-tabs: Files / Spill / KV */
+$$(".subtabs .tab[data-data-tab]").forEach((b) => (b.onclick = () => {
+  $$(".subtabs .tab[data-data-tab]").forEach((x) => x.classList.toggle("active", x === b));
+  state.dataTab = b.dataset.dataTab;
+  $("#data-pane-files").classList.toggle("hidden", state.dataTab !== "files");
+  $("#data-pane-spill").classList.toggle("hidden", state.dataTab !== "spill");
+  $("#data-pane-kv").classList.toggle("hidden", state.dataTab !== "kv");
+  loadDataTab();
 }));
 
 /* ── theme ─────────────────────────────────────────────────── */
@@ -264,7 +282,7 @@ function openEvents() {
   // Anything else that may change the open view or the lists.
   for (const type of ["answer", "tool_call", "tool_result", "compacted", "finished", "spawned",
                       "job_started", "job_updated", "job_finished",
-                      "skill_defined", "skill_deleted", "skill_loaded", "skill_unloaded"]) {
+                      "skill_defined", "skill_deleted", "skill_loaded", "skill_unloaded", "kv_changed"]) {
     es.addEventListener(type, (e) => {
       let ev = {};
       try { ev = JSON.parse(e.data); } catch { /* ignore */ }
@@ -275,6 +293,7 @@ function openEvents() {
       if (state.view === "jobs") debounce("jobs", loadJobs, 400);
       if (state.view === "skills") debounce("skills", loadSkills, 400);
       if (state.view === "activity") debounce("runs", loadRuns, 400);
+      if (state.view === "data" && state.dataTab === "kv") debounce("kv", loadKV, 400);
     });
   }
 }
@@ -1129,6 +1148,99 @@ async function selectMemory(id, offset) {
 
 $("#btn-refresh-memory").onclick = loadMemory;
 
+/* ── data: KV (per-agent key/value memory, remember/recall/forget) ── */
+
+async function loadKV() {
+  try {
+    const agent = $("#kv-agent-filter").value.trim();
+    state.kv = await api("GET", "/api/kv" + (agent ? "?agent=" + encodeURIComponent(agent) : ""));
+    renderKV();
+  } catch (e) { toast(String(e)); }
+}
+
+function renderKV() {
+  const t = $("#kv-table");
+  if (!state.kv?.length) {
+    t.innerHTML = `<tr><td class="empty">No keys yet — agents save data with remember(key, value), or add one with + key.</td></tr>`;
+    return;
+  }
+  t.innerHTML =
+    `<tr><th style="width:16%">agent</th><th style="width:32%">key</th><th style="width:9%">chars</th><th style="width:16%">updated</th><th></th></tr>` +
+    state.kv.map((k) => `<tr class="clickable ${state.kvSel === k.agent + "/" + k.key ? "selected" : ""}" data-agent="${esc(k.agent)}" data-key="${esc(k.key)}">
+      <td class="mono">${esc(k.agent)}</td>
+      <td class="mono">${esc(k.key)}</td>
+      <td class="mono">${k.chars}</td>
+      <td class="mono">${fmtStamp(k.updated_at)}</td>
+      <td><button class="btn icon small row-del" data-agent="${esc(k.agent)}" data-key="${esc(k.key)}" title="Delete">✕</button></td>
+    </tr>`).join("");
+  $$("#kv-table tr.clickable").forEach((tr) => (tr.onclick = () => selectKV(tr.dataset.agent, tr.dataset.key)));
+  $$("#kv-table .row-del").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    deleteKV(b.dataset.agent, b.dataset.key);
+  }));
+}
+
+async function selectKV(agent, key) {
+  try {
+    state.kvSel = agent + "/" + key;
+    renderKV();
+    const r = await api("GET", `/api/kv/${encodeURIComponent(agent)}/${encodeURIComponent(key)}`);
+    const d = $("#kv-detail");
+    d.classList.remove("hidden");
+    $("#kv-detail-title").textContent = `${agent}/${key}`;
+    $("#kv-detail-meta").textContent = `${r.chars} chars · updated ${fmtRel(r.updated_at)}`;
+    $("#kv-value").value = r.value;
+    $("#btn-kv-save").onclick = async () => {
+      try {
+        await api("PUT", `/api/kv/${encodeURIComponent(agent)}/${encodeURIComponent(key)}`, { value: $("#kv-value").value });
+        toast(`saved ${agent}/${key}`, true);
+        loadKV();
+        selectKV(agent, key);
+      } catch (e) { toast(String(e)); }
+    };
+    $("#btn-kv-delete").onclick = () => deleteKV(agent, key);
+  } catch (e) { toast(String(e)); }
+}
+
+function deleteKV(agent, key) {
+  openModal(`Delete ${esc(agent + "/" + key)}?`, `<p style="margin:6px 0;color:var(--dim)">This cannot be undone.</p>`, [
+    { label: "Cancel" },
+    { label: "Delete", danger: true, onClick: async () => {
+      await api("DELETE", `/api/kv/${encodeURIComponent(agent)}/${encodeURIComponent(key)}`);
+      toast(`deleted ${agent}/${key}`, true);
+      if (state.kvSel === agent + "/" + key) {
+        state.kvSel = null;
+        $("#kv-detail").classList.add("hidden");
+      }
+      loadKV();
+    }},
+  ]);
+}
+
+$("#btn-refresh-kv").onclick = loadKV;
+$("#kv-agent-filter").addEventListener("input", () => debounce("kv-filter", loadKV, 350));
+
+$("#btn-new-kv").onclick = async () => {
+  const agents = state.agents?.length ? state.agents : await api("GET", "/api/agents");
+  const opts = agents.map((a) => `<option value="${esc(a.id)}">${esc(a.id)} — ${esc(a.name)}</option>`).join("");
+  openModal("New key", `
+    <div class="form-grid">
+      <div><label>Agent (owner)</label><select id="kv-n-agent">${opts}</select></div>
+      <div><label>Key</label><input id="kv-n-key" placeholder="todo" maxlength="64"></div>
+      <div class="full"><label>Value</label><textarea id="kv-n-value" rows="6"></textarea></div>
+    </div>`, [
+    { label: "Cancel" },
+    { label: "Save", primary: true, onClick: async () => {
+      const agent = $("#kv-n-agent").value;
+      const key = $("#kv-n-key").value.trim();
+      if (!key) { toast("key is required"); return false; }
+      await api("PUT", `/api/kv/${encodeURIComponent(agent)}/${encodeURIComponent(key)}`, { value: $("#kv-n-value").value });
+      toast(`saved ${agent}/${key}`, true);
+      loadKV();
+    }},
+  ]);
+};
+
 /* ── logs ──────────────────────────────────────────────────── */
 
 async function loadLogs() {
@@ -1470,6 +1582,5 @@ setInterval(() => {
   else if (state.view === "activity") { loadRuns(); if (state.subtab === "logs" && state.logsFollow) loadLogs(); }
   else if (state.view === "jobs") loadJobs();
   else if (state.view === "skills") loadSkills();
-  else if (state.view === "memory") loadMemory();
-  else if (state.view === "files") loadFiles();
+  else if (state.view === "data") loadDataTab();
 }, 3000);

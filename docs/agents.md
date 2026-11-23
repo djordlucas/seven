@@ -58,6 +58,7 @@ continuous agent whose turn fails stays `idle`, records the error, and waits
 | `define_skill`, `read_skill`, `list_skills`, `delete_skill`, `load_skill`, `unload_skill` | Skills (below). |
 | `list_tools`, `describe_tool` | Tool discovery: list all tools; reveal one so it is callable from the next step (persisted). |
 | `read_memory` | Read a chunk of spilled output by memory id, offset and limit. |
+| `remember`, `recall`, `forget` | The agent's own key/value memory (persists across restarts, per-agent keys, shown in the UI's Data view): save, read (no key = list keys), delete. |
 
 Agents are referred to by id or by name; a name resolves to the active agent
 with that name, else the most recent one.
