@@ -45,6 +45,9 @@ async function api(method, path, body) {
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Markdown for message bodies (markdown.js); falls back to plain escaped text.
+const renderMd = (s) => (typeof renderMarkdown === "function" ? renderMarkdown(s) : esc(s));
+
 function toast(msg, ok = false) {
   const box = $("#toasts");
   const t = document.createElement("div");
@@ -396,7 +399,7 @@ async function loadMail(folder) {
           const head = folder === "inbox"
             ? `#${r.id} · ${esc(r.kind)} · from ${esc(r.sender)} · ${r.delivered_at ? "delivered" : "PENDING"}`
             : `#${r.id} · ${esc(r.kind)} · to ${esc(r.recipient)} · ${r.delivered_at ? "delivered" : "undelivered"}`;
-          return `<div class="mrow ${r.delivered_at ? "" : "pending"}"><div class="mhead">${head}</div>${esc(r.text ?? "")}</div>`;
+          return `<div class="mrow ${r.delivered_at ? "" : "pending"}"><div class="mhead">${head}</div><div class="md">${renderMd(r.text ?? "")}</div></div>`;
         }).join("")
       : `<div class="mrow"><div class="mhead">empty</div></div>`;
   } catch (e) {
@@ -428,7 +431,7 @@ function appendMessage(m) {
   div.className = "msg " + (m.role || "user");
   let html = `<div class="role">${esc(m.role)}${m.name ? " · " + esc(m.name) : ""}</div>`;
   if (m.role === "assistant" && m.tool_calls) {
-    html += esc(m.content ?? "") ? `<div>${esc(m.content)}</div>` : "";
+    html += m.content ? `<div class="md">${renderMd(m.content)}</div>` : "";
     for (const c of m.tool_calls) {
       let args = c.function?.arguments ?? "";
       try { args = JSON.stringify(JSON.parse(args), null, 2); } catch { /* keep raw */ }
@@ -437,7 +440,7 @@ function appendMessage(m) {
   } else if (m.role === "tool") {
     html += `<details><summary>↳ result${m.name ? " · " + esc(m.name) : ""}</summary><pre>${esc(m.content ?? "")}</pre></details>`;
   } else {
-    html += esc(m.content ?? "");
+    html += `<div class="md">${renderMd(m.content ?? "")}</div>`;
   }
   div.innerHTML = html;
   box.appendChild(div);

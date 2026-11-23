@@ -286,6 +286,42 @@ select { width: auto; }
   font-family: var(--mono); font-size: 11.5px; color: var(--text);
 }
 
+/* ── markdown content in messages (rendered by markdown.js) ─── */
+.msg .md, .mrow .md { white-space: normal; min-width: 0; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 6px 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 10px 0 5px; line-height: 1.25; font-weight: 650; }
+.md h1 { font-size: 17px; } .md h2 { font-size: 15px; } .md h3 { font-size: 14px; }
+.md h4, .md h5, .md h6 { font-size: 13px; color: var(--dim); }
+.md h1, .md h2 { padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li { margin: 2px 0; }
+.md li::marker { color: var(--faint); }
+.md code {
+  font-family: var(--mono); font-size: 11.5px;
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 1px 5px;
+}
+.md pre.code {
+  margin: 8px 0; background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 11px; overflow: auto; max-height: 340px;
+}
+.md pre.code code { background: none; border: 0; padding: 0; font-size: 11.5px; }
+.md blockquote {
+  margin: 8px 0; padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--accent); color: var(--dim);
+}
+.md table { border-collapse: collapse; margin: 8px 0; font-size: 12.5px; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
+.md th { background: var(--surface-3); font-weight: 600; white-space: nowrap; }
+.md tbody tr:nth-child(even) { background: var(--surface-2); }
+.md a { color: var(--info); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
+.md img { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+.md del { color: var(--faint); }
+
 .mail-pane { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 200px; }
 .mrow {
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px;

@@ -19,6 +19,13 @@ center, the live-stream status and a theme switcher (dark/light, remembered in
 `localStorage`). Agent descriptions appear in a floating box after hovering a
 roster row for about a second. |
 
+Message bodies (conversation, inbox, outbox) are rendered as markdown by
+`seven/api/ui/markdown.js` — a small dependency-free renderer that escapes all
+HTML first, so LLM output can never inject markup. It covers headings, fenced
+code blocks, blockquotes, GFM tables, lists, links and images (non-http(s)
+URLs are dropped), plus inline code/bold/italic/strikethrough. Tool results
+stay raw monospace in a `<pre>`. |
+
 ## Limits
 
 | Limit | Detail |
