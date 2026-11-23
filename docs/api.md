@@ -54,7 +54,7 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `POST /api/skills/{name}/unload?agent=a1` | Unload it from one agent. |
 | `GET /api/memory` | Spilled outputs, newest first: id, agent, tool, path, chars, lines. |
 | `GET /api/memory/{oid}?offset=&limit=` | One spilled output as a character window: `chunk`, `total_chars`, `next_offset`. |
-| `GET /api/kv?agent=` | Per-agent key/value memory entries (newest first): agent, key, chars, updated_at — values omitted. |
+| `GET /api/kv?agent=` | Per-agent key/value memory entries (newest first): agent, key, chars, updated_at, plus an 80-char `preview` — full values omitted. |
 | `GET /api/kv/{agent}/{key}` | One entry including `value`. 404 if missing. |
 | `PUT /api/kv/{agent}/{key}` | Set/overwrite: `{"value"}` (64 KB cap → 413). Keys are 1-64 chars of `[A-Za-z0-9_.-]`. Emits `kv_changed`. |
 | `DELETE /api/kv/{agent}/{key}` | Delete one entry; 404 if missing. Emits `kv_changed`. |

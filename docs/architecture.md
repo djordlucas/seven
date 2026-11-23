@@ -108,7 +108,7 @@ ends with `Stopped after N steps without a final answer.`
 | `define_skill`, `read_skill`, `list_skills`, `delete_skill`, `load_skill`, `unload_skill` | Skills: named bundles of generated tools plus instructions; loading one makes its tools callable (`agents.md#skills). |
 | `list_tools`, `describe_tool` | Tool discovery: list everything that exists; reveal one tool's schema, persistently, so it is callable from the next step. |
 | `read_memory` | Read a character window of spilled output (`SEVEN_MEMORY_DIR`), with total size and next offset. |
-| `remember`, `recall`, `forget` | Per-agent key/value memory in the state DB (`kv` table): save, read/list, delete. 64 KB value cap. |
+| `remember`, `recall`, `forget` | Per-agent key/value memory in the state DB (`kv` table) — CRUD: upsert, paged read (`offset`/`limit`), key listing with previews, delete. 64 KB value cap. |
 | `sql` | Runs SQL on a SQLite database file in the workspace (`data.md`). |
 
 The built-ins are deliberately limited to running code, managing generated

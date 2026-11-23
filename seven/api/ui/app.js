@@ -1168,7 +1168,7 @@ function renderKV() {
     `<tr><th style="width:16%">agent</th><th style="width:32%">key</th><th style="width:9%">chars</th><th style="width:16%">updated</th><th></th></tr>` +
     state.kv.map((k) => `<tr class="clickable ${state.kvSel === k.agent + "/" + k.key ? "selected" : ""}" data-agent="${esc(k.agent)}" data-key="${esc(k.key)}">
       <td class="mono">${esc(k.agent)}</td>
-      <td class="mono">${esc(k.key)}</td>
+      <td class="mono" title="${esc((k.preview || "").replace(/\n/g, " "))}">${esc(k.key)}</td>
       <td class="mono">${k.chars}</td>
       <td class="mono">${fmtStamp(k.updated_at)}</td>
       <td><button class="btn icon small row-del" data-agent="${esc(k.agent)}" data-key="${esc(k.key)}" title="Delete">✕</button></td>

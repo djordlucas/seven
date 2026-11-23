@@ -47,12 +47,15 @@ def memory_builtins() -> list:
         ),
         Builtin(
             name="recall",
-            description="Read back data from your key/value memory. With a key, returns that value; "
-                        "without a key, lists all your keys with sizes and last update.",
+            description="Read back data from your key/value memory. With a key, returns a character window of that "
+                        "value (offset/limit page through big values, like read_memory); without a key, lists all "
+                        "your keys with sizes, last update and a short value preview.",
             parameters={
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Key to read. Omit to list all your keys."},
+                    "offset": {"type": "integer", "description": "Character offset into the value. Default 0."},
+                    "limit": {"type": "integer", "description": "Characters to return. Default 4000."},
                 },
             },
             run=_recall,
@@ -84,10 +87,11 @@ async def _remember(a: dict, ctx: BuiltinContext) -> str:
     value = str(a.get("value", ""))
     if len(value) > KV_MAX_CHARS:
         return f"error: value too large ({len(value)} chars; max {KV_MAX_CHARS}). Use a file for big data."
+    existed = ctx.state.kv_get(ctx.agent_id, key) is not None
     ctx.state.kv_put(ctx.agent_id, key, value)
     ctx.supervisor.emit({"type": "kv_changed", "agent": ctx.agent_id, "key": key, "op": "put"})
     ctx.log.info("kv put", agent=ctx.agent_id, key=key, chars=len(value))
-    return f"remembered {key} ({len(value)} chars)"
+    return f"{'updated' if existed else 'remembered'} {key} ({len(value)} chars)"
 
 
 async def _recall(a: dict, ctx: BuiltinContext) -> str:
@@ -99,14 +103,25 @@ async def _recall(a: dict, ctx: BuiltinContext) -> str:
         row = ctx.state.kv_get(ctx.agent_id, key)
         if not row:
             return f'error: no key "{key}"'
-        return f"{key} ({row['chars']} chars, updated {row['updated_at']}):\n---\n{row['value']}"
+        value = row["value"]
+        offset = positive(a.get("offset"), 0)
+        limit = positive(a.get("limit"), 4000)
+        window = value[offset:offset + limit]
+        nxt = offset + len(window)
+        head = f'{key}: {len(value)} chars total (updated {row["updated_at"]}); showing [{offset}, {nxt})'
+        if nxt < len(value):
+            head += f'; next: recall("{key}", {nxt}, {limit})'
+        return head + "\n---\n" + window
     rows = ctx.state.kv_list(ctx.agent_id)
     if not rows:
         return "no keys remembered yet"
     lines = [f"{len(rows)} key(s) in your memory:"]
     for r in rows:
-        lines.append(f"- {r['key']} ({r['chars']} chars, {r['updated_at']})")
-    lines.append('recall("key") reads one')
+        preview = str(r.get("preview") or "").replace("\n", " ")
+        if len(preview) > 80:
+            preview = preview[:80] + "…"
+        lines.append(f"- {r['key']} ({r['chars']} chars, {r['updated_at']}) — {preview}")
+    lines.append('recall("key") reads one; recall("key", offset, limit) pages through it')
     return "\n".join(lines)
 
 

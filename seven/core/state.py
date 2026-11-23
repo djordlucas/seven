@@ -686,10 +686,11 @@ class State:
         return dict(r) if r else None
 
     def kv_list(self, agent: str | None = None) -> list[dict]:
+        # preview = first 81 chars of the value (callers ellipsize past 80); values stay out of the row otherwise
         if agent:
-            rows = self.query("SELECT agent, key, chars, updated_at FROM kv WHERE agent = ? ORDER BY updated_at DESC, key", (agent,))
+            rows = self.query("SELECT agent, key, chars, updated_at, substr(value, 1, 81) AS preview FROM kv WHERE agent = ? ORDER BY updated_at DESC, key LIMIT 500", (agent,))
         else:
-            rows = self.query("SELECT agent, key, chars, updated_at FROM kv ORDER BY updated_at DESC, agent, key")
+            rows = self.query("SELECT agent, key, chars, updated_at, substr(value, 1, 81) AS preview FROM kv ORDER BY updated_at DESC, agent, key LIMIT 500")
         return [dict(r) for r in rows]
 
     def kv_delete(self, agent: str, key: str) -> bool:

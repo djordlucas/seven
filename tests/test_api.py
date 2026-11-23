@@ -222,6 +222,7 @@ async def test_kv_endpoints(api):
     keys = {(k["agent"], k["key"]) for k in r.json()}
     assert keys == {("seven", "todo"), ("a9", "note")}
     assert all("value" not in k for k in r.json())  # the list omits values
+    assert all("preview" in k for k in r.json())  # …but carries a short preview
     r = await c.get("/api/kv", params={"agent": "seven"})
     assert [k["key"] for k in r.json()] == ["todo"]
     r = await c.get("/api/kv/seven/todo")
