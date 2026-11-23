@@ -307,6 +307,14 @@ async function loadAgents() {
     if (state.selectedAgent) {
       const a = state.agents.find((x) => x.id === state.selectedAgent);
       if (a) renderChatHeader(a);
+    } else {
+      // nothing selected: keep the chat pane from looking dead
+      $("#chat-title").textContent = "No agent selected";
+      $("#chat-status").textContent = "";
+      $("#chat-actions").innerHTML = "";
+      $("#send-form").classList.add("hidden");
+      $("#messages").innerHTML = `<div class="msg system">Select an agent on the left to open its chat.</div>`;
+      $("#mail-pane").innerHTML = "";
     }
   } catch (e) { toast(String(e)); }
 }
@@ -498,7 +506,7 @@ async function loadMail(folder) {
             : `#${r.id} · ${esc(r.kind)} · to ${esc(r.recipient)} · ${r.delivered_at ? "delivered" : "undelivered"}`;
           return `<div class="mrow ${r.delivered_at ? "" : "pending"}"><div class="mhead">${head}</div><div class="md">${renderMd(r.text ?? "")}</div></div>`;
         }).join("")
-      : `<div class="mrow"><div class="mhead">empty</div></div>`;
+      : `<div class="mail-empty">No ${esc(folder)} items.</div>`;
   } catch (e) {
     pane.innerHTML = `<div class="mrow">${esc(String(e))}</div>`;
   }
@@ -518,15 +526,15 @@ function renderMessages(messages) {
   if (!messages.length) {
     box.innerHTML = `<div class="msg system">No messages yet — send one below.</div>`;
   }
-  for (const m of messages) appendMessage(m.message);
+  for (const m of messages) appendMessage(m.message, m.created_at);
   box.scrollTop = box.scrollHeight;
 }
 
-function appendMessage(m) {
+function appendMessage(m, ts) {
   const box = $("#messages");
   const div = document.createElement("div");
   div.className = "msg " + (m.role || "user");
-  let html = `<div class="role"><span class="dot ${esc(m.role || "user")}"></span>${esc(m.role)}${m.name ? " · " + esc(m.name) : ""}</div>`;
+  let html = `<div class="role"><span class="dot ${esc(m.role || "user")}"></span>${esc(m.role)}${m.name ? " · " + esc(m.name) : ""}<span class="msg-time">${fmtRel(ts || new Date().toISOString())}</span></div><button class="msg-copy" title="Copy message text">⧉</button>`;
   if (m.role === "assistant" && m.tool_calls) {
     html += m.content ? `<div class="md">${renderMd(m.content)}</div>` : "";
     for (const c of m.tool_calls) {
@@ -549,6 +557,7 @@ $("#send-form").onsubmit = async (e) => {
   const text = $("#send-input").value.trim();
   if (!text || !state.selectedAgent) return;
   $("#send-input").value = "";
+  $("#send-input").style.height = "";
   try {
     await api("POST", `/api/agents/${state.selectedAgent}/messages`, { text });
     loadAgents();
@@ -561,22 +570,41 @@ $("#send-input").addEventListener("keydown", (e) => {
   }
 });
 
-// Copy button on rendered markdown code blocks (delegated: works for live-appended messages too)
+// Copy buttons: markdown code blocks and whole messages (delegated: works for live-appended messages too)
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest(".copy-btn");
+  const btn = e.target.closest(".copy-btn, .msg-copy");
   if (!btn) return;
-  const code = btn.closest(".codeblock")?.querySelector("pre.code code");
-  if (!code) return;
+  let text = null, flash = "copied ✓", reset = "copy";
+  if (btn.classList.contains("copy-btn")) {
+    const code = btn.closest(".codeblock")?.querySelector("pre.code code");
+    if (code) text = code.textContent;
+  } else {
+    const msg = btn.closest(".msg");
+    if (msg) {
+      const clone = msg.cloneNode(true);
+      clone.querySelectorAll(".role, .msg-copy").forEach((n) => n.remove());
+      text = clone.textContent.trim();
+      flash = "✓"; reset = "⧉";
+    }
+  }
+  if (text == null) return;
   const done = () => {
-    btn.textContent = "copied ✓";
+    btn.textContent = flash;
     btn.classList.add("ok");
-    setTimeout(() => { btn.textContent = "copy"; btn.classList.remove("ok"); }, 1400);
+    setTimeout(() => { btn.textContent = reset; btn.classList.remove("ok"); }, 1400);
   };
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(code.textContent).then(done, () => toast("copy failed"));
+    navigator.clipboard.writeText(text).then(done, () => toast("copy failed"));
   } else {
     toast("clipboard unavailable");
   }
+});
+
+// composer grows with content (capped), resets after send
+const sendInput = $("#send-input");
+sendInput.addEventListener("input", () => {
+  sendInput.style.height = "auto";
+  sendInput.style.height = Math.min(sendInput.scrollHeight, 180) + "px";
 });
 
 // 📎 upload file(s) to the workspace, then tell the agent about them
@@ -1280,9 +1308,16 @@ async function loadConfig() {
   try {
     const cfg = await api("GET", "/api/config");
     const health = await api("GET", "/api/health");
-    const fmtVal = (v) => (v == null ? "—" : typeof v === "boolean" ? (v ? "yes" : "no") : typeof v === "object" ? JSON.stringify(v) : String(v));
+    const fmtVal = (k, v) => {
+      if (v == null) return "—";
+      if (k === "uptime_s") return fmtUptime(v);
+      if (typeof v === "boolean") return v ? "yes" : "no";
+      if (typeof v === "number") return v.toLocaleString();
+      if (typeof v === "object") return JSON.stringify(v);
+      return String(v);
+    };
     const rows = Object.entries({ ...health, ...cfg })
-      .map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono">${esc(fmtVal(v))}</td></tr>`)
+      .map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono cfg-val" title="${esc(fmtVal(k, v))}">${esc(fmtVal(k, v))}</td></tr>`)
       .join("");
     $("#config-table").innerHTML = `<tr><th style="width:24%">key</th><th>value</th></tr>${rows}`;
   } catch (e) { toast(String(e)); }
