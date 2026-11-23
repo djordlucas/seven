@@ -55,6 +55,17 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `GET /api/memory/{oid}?offset=&limit=` | One spilled output as a character window: `chunk`, `total_chars`, `next_offset`. |
 | `GET /api/logs?agent=&turn=&run=&level=&grep=&tail=` | Structured log lines, filtered (`logging.md`). |
 | `GET /api/events?agent=` | SSE stream of agent events (below). |
+| `GET /api/files/list?rel=` | List a workspace folder (`entries`: name, kind, size, mtime; dirs first) or stat one file. |
+| `GET /api/files/read?rel=` | Read a text file (256 KB cap): `content`, plus `size`, `truncated`, `binary` (binary files return `content: null`). |
+| `PUT /api/files/write` | Create/overwrite a text file: `{"path", "content"}` (4 MB cap); parent folders are created. |
+| `POST /api/files/mkdir` | `{"path"}`; 409 if it exists. |
+| `POST /api/files/rename` | `{"src", "dst"}` — rename or move within the workspace; 409 if `dst` exists. |
+| `DELETE /api/files?rel=&recursive=` | Delete a file, or a folder (`recursive=true` for non-empty ones). The workspace root is refused. |
+| `POST /api/files/upload?rel=` | Upload with the raw request body as the file bytes; `rel` is the destination path (parent folders are created, or pass a directory to keep the client filename). |
+| `GET /api/files/download?rel=` | Download a file. |
+
+All `/api/files` paths are relative to the workspace root and resolved before
+use — anything escaping it (`..`, absolute paths, symlinks out) gets a 400.
 
 Errors are `{"detail": "…"}` with a 4xx status.
 

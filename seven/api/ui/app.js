@@ -16,6 +16,8 @@ const state = {
   jobs: [],
   skills: [],
   memory: [],
+  filesPath: "",
+  fileSel: null,
   logsFollow: false,
   logsTimer: null,
   es: null,
@@ -66,6 +68,12 @@ const fmtTime = (iso) => {
 };
 
 const fmtDur = (ms) => (ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
+
+const fmtBytes = (n) =>
+  n == null ? "—"
+  : n < 1024 ? `${n} B`
+  : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB`
+  : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 const pretty = (v) => (typeof v === "string" ? v : JSON.stringify(v, null, 2));
 
@@ -130,6 +138,7 @@ function confirmModal(title, text, onYes) {
 const loaders = {
   agents: null, // loaded explicitly
   tools: () => loadTools(),
+  files: () => loadFiles(),
   activity: () => { loadRuns(); if (state.subtab === "logs") loadLogs(); },
   jobs: () => loadJobs(),
   skills: () => loadSkills(),
@@ -487,6 +496,33 @@ $("#send-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     $("#send-form").requestSubmit();
+  }
+});
+
+// 📎 upload file(s) to the workspace, then tell the agent about them
+$("#btn-attach").onclick = () => $("#attach-input").click();
+$("#attach-input").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length || !state.selectedAgent) return;
+  const done = [];
+  for (const f of files) {
+    try {
+      const dest = `uploads/${f.name}`;
+      const res = await fetch(`/api/files/upload?rel=${encodeURIComponent(dest)}`, { method: "POST", body: f });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+      done.push(await res.json());
+      toast(`uploaded ${dest}`, true);
+    } catch (err) { toast(`${f.name}: ${err}`); }
+  }
+  if (done.length) {
+    const text = "📎 file" + (done.length > 1 ? "s" : "") + " uploaded to the workspace:\n" +
+      done.map((d) => `- \`${d.path}\` (${fmtBytes(d.size)})`).join("\n") +
+      "\nRead them with your tools.";
+    try {
+      await api("POST", `/api/agents/${state.selectedAgent}/messages`, { text });
+      loadAgents();
+    } catch (err) { toast(String(err)); }
   }
 });
 
@@ -1064,6 +1100,198 @@ async function loadConfig() {
   } catch (e) { toast(String(e)); }
 }
 
+/* ── files (workspace file manager) ────────────────────────── */
+
+const joinPath = (dir, name) => (dir ? `${dir}/${name}` : name);
+
+async function loadFiles() {
+  try {
+    const r = await api("GET", `/api/files/list?rel=${encodeURIComponent(state.filesPath)}`);
+    renderFiles(r);
+  } catch (e) { toast(String(e)); }
+}
+
+function renderFiles(r) {
+  state.filesPath = r.path;
+  const crumbs = $("#files-crumbs");
+  crumbs.innerHTML = ["workspace", ...r.path.split("/").filter(Boolean)]
+    .map((p, i, arr) => i === arr.length - 1
+      ? esc(p)
+      : `<a href="#" data-part="${esc(arr.slice(0, i + 1).join("/"))}">${esc(p)}</a>`)
+    .join(" / ");
+  crumbs.querySelectorAll("a").forEach((a) => (a.onclick = (e) => {
+    e.preventDefault();
+    state.fileSel = null;
+    state.filesPath = a.dataset.part;
+    loadFiles();
+  }));
+  const t = $("#files-table");
+  const entries = (r.entries ?? []).filter((e) => !e.name.startsWith(".")); // hide internal dotfiles (.seven)
+  if (!entries.length) {
+    t.innerHTML = `<tr><td class="kv">empty folder</td></tr>`;
+    return;
+  }
+  t.innerHTML =
+    `<tr><th style="width:44%">name</th><th style="width:10%">size</th><th style="width:22%">modified</th><th>kind</th></tr>` +
+    entries.map((en) => {
+      const rel = joinPath(r.path, en.name);
+      const icon = en.kind === "dir" ? "📁" : "📄";
+      return `<tr class="clickable ${state.fileSel === rel ? "selected" : ""}" data-rel="${esc(rel)}" data-kind="${en.kind}">
+        <td>${icon} ${esc(en.name)}${en.kind === "dir" ? "/" : ""}</td>
+        <td class="mono">${en.kind === "dir" ? "—" : fmtBytes(en.size)}</td>
+        <td class="mono">${fmtTime(new Date(en.mtime * 1000).toISOString())}</td>
+        <td class="kv">${en.kind} <button class="btn icon small row-del" data-rel="${esc(rel)}" data-kind="${en.kind}" title="Delete">✕</button></td>
+      </tr>`;
+    }).join("");
+  $$("#files-table tr.clickable").forEach((tr) => (tr.onclick = () => {
+    if (tr.dataset.kind === "dir") {
+      state.fileSel = null;
+      state.filesPath = tr.dataset.rel;
+      loadFiles();
+    } else {
+      openFile(tr.dataset.rel);
+    }
+  }));
+  $$("#files-table .row-del").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    deletePath(b.dataset.rel, b.dataset.kind === "dir");
+  }));
+}
+
+function deletePath(rel, isDir) {
+  openModal(`Delete ${esc(rel)}?`, `<p style="margin:6px 0;color:var(--dim)">${isDir ? "The folder and everything in it will be removed." : "This cannot be undone."}</p>`, [
+    { label: "Cancel" },
+    { label: "Delete", danger: true, onClick: async () => {
+      await api("DELETE", `/api/files?rel=${encodeURIComponent(rel)}&recursive=${isDir}`);
+      toast(`deleted ${rel}`, true);
+      if (state.fileSel === rel) {
+        state.fileSel = null;
+        $("#file-detail").classList.add("hidden");
+      }
+      loadFiles();
+    } },
+  ]);
+}
+
+async function openFile(rel) {
+  state.fileSel = rel;
+  $$("#files-table tr.clickable").forEach((tr) => tr.classList.toggle("selected", tr.dataset.rel === rel));
+  try {
+    const r = await api("GET", `/api/files/read?rel=${encodeURIComponent(rel)}`);
+    const box = $("#file-detail");
+    box.classList.remove("hidden");
+    $("#file-detail-title").textContent = rel;
+    $("#file-detail-meta").textContent = `${fmtBytes(r.size)}${r.truncated ? " · truncated read" : ""}${r.binary ? " · binary" : ""}`;
+    const prev = $("#file-preview");
+    const ta = $("#file-content");
+    const imgExt = /\.(png|jpe?g|gif|webp|svg)$/i.test(rel);
+    if (r.binary && imgExt) {
+      prev.innerHTML = `<img src="/api/files/download?rel=${encodeURIComponent(rel)}" alt="${esc(rel)}">`;
+      prev.classList.remove("hidden");
+      ta.classList.add("hidden");
+      $("#btn-file-save").classList.add("hidden");
+    } else if (r.binary) {
+      prev.innerHTML = `<div class="kv">binary file — download to view. Not editable here.</div>`;
+      prev.classList.remove("hidden");
+      ta.classList.add("hidden");
+      $("#btn-file-save").classList.add("hidden");
+    } else {
+      prev.classList.add("hidden");
+      ta.value = r.content ?? "";
+      ta.classList.remove("hidden");
+      $("#btn-file-save").classList.remove("hidden");
+    }
+  } catch (e) { toast(String(e)); }
+}
+
+$("#btn-files-up").onclick = () => {
+  state.fileSel = null;
+  state.filesPath = state.filesPath.split("/").slice(0, -1).join("/");
+  loadFiles();
+};
+$("#btn-files-refresh").onclick = () => loadFiles();
+$("#btn-files-upload").onclick = () => $("#files-upload-input").click();
+$("#files-upload-input").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  for (const f of files) {
+    try {
+      const dest = joinPath(state.filesPath, `uploads/${f.name}`);
+      const res = await fetch(`/api/files/upload?rel=${encodeURIComponent(dest)}`, { method: "POST", body: f });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+      toast(`uploaded ${dest}`, true);
+    } catch (err) { toast(`${f.name}: ${err}`); }
+  }
+  if (files.length) loadFiles();
+});
+
+$("#btn-new-file").onclick = () => {
+  openModal("New file", `<div class="form-grid"><div class="full"><label>Name (in ${esc(state.filesPath || "workspace root")})</label><input id="f-name" placeholder="notes.md"></div></div>`, [
+    { label: "Cancel" },
+    { label: "Create", primary: true, onClick: async () => {
+      const name = $("#f-name").value.trim();
+      if (!name) return;
+      const rel = joinPath(state.filesPath, name);
+      await api("PUT", "/api/files/write", { path: rel, content: "" });
+      toast(`created ${rel}`, true);
+      loadFiles();
+      openFile(rel);
+    } },
+  ]);
+};
+
+$("#btn-new-dir").onclick = () => {
+  openModal("New folder", `<div class="form-grid"><div class="full"><label>Name (in ${esc(state.filesPath || "workspace root")})</label><input id="f-name" placeholder="docs"></div></div>`, [
+    { label: "Cancel" },
+    { label: "Create", primary: true, onClick: async () => {
+      const name = $("#f-name").value.trim();
+      if (!name) return;
+      await api("POST", "/api/files/mkdir", { path: joinPath(state.filesPath, name) });
+      toast("folder created", true);
+      loadFiles();
+    } },
+  ]);
+};
+
+$("#btn-file-save").onclick = async () => {
+  if (!state.fileSel) return;
+  try {
+    await api("PUT", "/api/files/write", { path: state.fileSel, content: $("#file-content").value });
+    toast(`saved ${state.fileSel}`, true);
+    loadFiles();
+  } catch (e) { toast(String(e)); }
+};
+$("#file-content").addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); $("#btn-file-save").click(); }
+});
+
+$("#btn-file-download").onclick = () => {
+  if (state.fileSel) window.location = `/api/files/download?rel=${encodeURIComponent(state.fileSel)}`;
+};
+
+$("#btn-file-rename").onclick = () => {
+  if (!state.fileSel) return;
+  const old = state.fileSel;
+  const base = old.split("/").pop();
+  openModal("Rename / move", `<div class="form-grid"><div class="full"><label>New path (relative to workspace)</label><input id="f-name" value="${esc(old)}"></div></div>`, [
+    { label: "Cancel" },
+    { label: "Rename", primary: true, onClick: async () => {
+      const dst = $("#f-name").value.trim();
+      if (!dst || dst === old) return;
+      await api("POST", "/api/files/rename", { src: old, dst });
+      toast(`renamed to ${dst}`, true);
+      state.fileSel = dst;
+      state.filesPath = dst.split("/").slice(0, -1).join("/");
+      loadFiles();
+      openFile(dst);
+    } },
+  ]);
+};
+
+$("#btn-file-delete").onclick = () => {
+  if (state.fileSel) deletePath(state.fileSel, false);
+};
+
 /* ── boot ──────────────────────────────────────────────────── */
 
 refreshHealth();
@@ -1077,4 +1305,5 @@ setInterval(() => {
   else if (state.view === "jobs") loadJobs();
   else if (state.view === "skills") loadSkills();
   else if (state.view === "memory") loadMemory();
+  else if (state.view === "files") loadFiles();
 }, 3000);

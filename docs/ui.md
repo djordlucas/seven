@@ -6,8 +6,9 @@ in `seven/api/ui/`, no build step. It is feature-complete: every endpoint in
 
 | View | Covers |
 |------|--------|
-| Agents | The agent list (live, the supervisor peer included), a chat pane per agent with the full transcript, tool calls and results, Inbox and Outbox tabs per agent, sending a message, spawning an agent (all modes), stopping, compacting, resetting the conversation. Live updates arrive over `/api/events`. |
+| Agents | The agent list (live, the supervisor peer included), a chat pane per agent with the full transcript, tool calls and results, Inbox and Outbox tabs per agent, sending a message with Enter (Shift+Enter for a newline — no send button), a 📎 button that uploads file(s) to `uploads/` in the workspace and sends the agent a message with their paths, spawning an agent (all modes), stopping, compacting, resetting the conversation. Live updates arrive over `/api/events`. |
 | Tools | The generated tool list, one tool's definition, source and health, calling a tool with JSON args, starting a background run, disabling/enabling/deleting (refused with the using skills while one does), defining a new tool, and a Run Python box for `/api/exec`. |
+| Files | The workspace file manager: breadcrumb navigation, folder up, new file/folder, upload (multi-file), refresh; clicking a folder navigates, clicking a file opens an editor panel with save (Ctrl+S), download, rename/move and delete (per-row ✕ as well). Text files are editable (256 KB read cap), images preview inline, other binaries download-only. Dotfiles (`.seven`) are hidden. |
 | Activity | Runs and logs in one place, as sub-tabs: background runs (live) with one run's status, result and output and killing a live run; the structured log with agent/level/grep/tail filters and a follow mode. |
 | Jobs | Jobs (live): kind, spec, agent, status, turns, result or error; start (task/goal/periodic, on an agent), stop, pause, resume. |
 | Skills | Skills: list, define, edit, delete, read, and load/unload per agent. |
@@ -15,7 +16,7 @@ in `seven/api/ui/`, no build step. It is feature-complete: every endpoint in
 | Config | `/api/config` and `/api/health` as a table (the API key is never sent). |
 
 The top bar keeps the logo leftmost next to the nav (Agents, Memory, Skills,
-Tools, Activity, Jobs, System) and centers only the name label with the instance
+Tools, Files, Activity, Jobs, System) and centers only the name label with the instance
 name (the workspace directory's basename) as a chip; the right side holds the
 theme switcher (dark/light, remembered in `localStorage`), the live-stream dot
 and the health readout. The agent roster is grouped into sections per root

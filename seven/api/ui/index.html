@@ -16,6 +16,7 @@
       <button data-view="memory" class="nav-btn">Memory</button>
       <button data-view="skills" class="nav-btn">Skills</button>
       <button data-view="tools" class="nav-btn">Tools</button>
+      <button data-view="files" class="nav-btn">Files</button>
       <button data-view="activity" class="nav-btn">Activity</button>
       <button data-view="jobs" class="nav-btn">Jobs</button>
       <button data-view="config" class="nav-btn">System</button>
@@ -60,7 +61,8 @@
         <div id="messages" class="messages"></div>
         <form id="send-form" class="send-form hidden">
           <textarea id="send-input" rows="2" placeholder="Message this agent… (Enter to send, Shift+Enter for newline)"></textarea>
-          <button class="btn primary" type="submit">Send</button>
+          <button id="btn-attach" class="btn icon" type="button" title="Upload a file to the workspace and send its path to this agent">📎</button>
+          <input id="attach-input" type="file" multiple class="hidden">
         </form>
       </div>
     </div>
@@ -79,6 +81,39 @@
       <table class="list" id="tools-table"></table>
     </div>
     <div id="tool-detail" class="panel detail hidden"></div>
+  </section>
+
+  <!-- ── Files (workspace file manager) ────────────────────────── -->
+  <section id="view-files" class="view">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Files</h2>
+        <div class="actions">
+          <span id="files-crumbs" class="crumbs mono"></span>
+          <button id="btn-files-up" class="btn small" title="Up one level">↑</button>
+          <button id="btn-new-file" class="btn small">+ file</button>
+          <button id="btn-new-dir" class="btn small">+ folder</button>
+          <button id="btn-files-upload" class="btn small">⇪ upload</button>
+          <input id="files-upload-input" type="file" multiple class="hidden">
+          <button id="btn-files-refresh" class="btn small">refresh</button>
+        </div>
+      </div>
+      <table class="list" id="files-table"></table>
+    </div>
+    <div id="file-detail" class="panel detail hidden">
+      <div class="panel-head">
+        <h3 id="file-detail-title" class="mono"></h3>
+        <div class="actions">
+          <span id="file-detail-meta" class="kv"></span>
+          <button id="btn-file-download" class="btn small">download</button>
+          <button id="btn-file-rename" class="btn small">rename</button>
+          <button id="btn-file-delete" class="btn small danger">delete</button>
+          <button id="btn-file-save" class="btn small primary hidden">save</button>
+        </div>
+      </div>
+      <div id="file-preview" class="hidden"></div>
+      <textarea id="file-content" class="file-editor hidden" rows="18" spellcheck="false"></textarea>
+    </div>
   </section>
 
   <!-- ── Activity (runs + logs) ─────────────────────────────────── -->

@@ -359,8 +359,22 @@ select { width: auto; }
 .mrow.pending { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
 .mrow .mhead { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-bottom: 3px; }
 
-.send-form { display: flex; gap: 10px; align-items: flex-end; margin-top: 10px; }
+.send-form { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
 .send-form textarea { flex: 1; }
+.send-form .btn.icon { flex: none; font-size: 15px; padding: 7px 10px; }
+
+/* ── files view ─────────────────────────────────────────────── */
+.crumbs { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumbs a { color: var(--info); text-decoration: none; }
+.crumbs a:hover { text-decoration: underline; }
+#files-table .row-del { padding: 1px 7px; font-size: 11px; color: var(--faint); }
+#files-table .row-del:hover { color: var(--err); border-color: var(--err); background: none; }
+textarea.file-editor {
+  width: 100%; min-height: 46vh; resize: vertical;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5; tab-size: 4;
+}
+#file-preview img { max-width: 100%; max-height: 60vh; border-radius: 8px; border: 1px solid var(--border); }
+#file-preview { margin-bottom: 8px; }
 
 /* ── hover tooltip (agent roster descriptions) ───────────── */
 
@@ -494,14 +508,16 @@ select { width: auto; }
   #memory-table th:nth-child(2), #memory-table td:nth-child(2),
   #memory-table th:nth-child(5), #memory-table td:nth-child(5),
   #memory-table th:nth-child(6), #memory-table td:nth-child(6) { display: none; }
+  #files-table th:nth-child(3), #files-table td:nth-child(3) { display: none; }
+  #files-table th:nth-child(1) { width: 56% !important; }
+  #files-table th:nth-child(2) { width: 18% !important; }
 
   /* chat header actions go full-width on their own row */
   .chat-head .actions { width: 100%; margin-left: 0; }
   .chat-head .actions .btn { flex: 1; }
 
   .msg { max-width: 100%; font-size: 12.5px; padding: 8px 10px; }
-  .send-form { flex-direction: column; align-items: stretch; gap: 8px; }
-  .send-form .btn { width: 100%; padding: 10px; }
+  .send-form .btn.icon { padding: 9px 11px; }
 
   .modal-backdrop { padding: 3vh 10px; }
   .modal { padding: 14px; border-radius: 12px; }
