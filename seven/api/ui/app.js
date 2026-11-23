@@ -70,6 +70,38 @@ const fmtTime = (iso) => {
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
 };
 
+/* Relative timestamp as plain text ("5m ago") — for textContent contexts. */
+const fmtRel = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (s < 8) return "just now";
+  if (s < 60) return `${Math.floor(s)}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
+/* Relative timestamp as a <span> with the full locale time on hover — for
+   innerHTML table cells, so raw ISO strings never show. */
+const fmtStamp = (iso) => {
+  const d = new Date(iso);
+  const rel = esc(fmtRel(iso));
+  if (!iso || Number.isNaN(d.getTime())) return `<span class="stamp">${rel}</span>`;
+  return `<span class="stamp" title="${esc(d.toLocaleString())}">${rel}</span>`;
+};
+
+/* Uptime in compact human form: 42s / 4m 12s / 3h 9m / 2d 5h. */
+const fmtUptime = (s) => {
+  s = Math.max(0, Math.round(s ?? 0));
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s % 60}s`;
+  return `${s}s`;
+};
+
 const fmtDur = (ms) => (ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
 
 const fmtBytes = (n) =>
@@ -197,7 +229,7 @@ $("#theme-toggle").onclick = () => {
 async function refreshHealth() {
   try {
     const h = await api("GET", "/api/health");
-    $("#health").textContent = `v${h.version} · ${h.active_agents} agents · up ${Math.round(h.uptime_s)}s`;
+    $("#health").textContent = `v${h.version} · ${h.active_agents} agents · up ${fmtUptime(h.uptime_s)}`;
     const name = String(h.workspace || "").replace(/\/+$/, "").split("/").pop() || "instance";
     $("#instance-name").textContent = name;
   } catch {
@@ -263,7 +295,7 @@ async function loadAgents() {
 function renderAgents() {
   const t = $("#agents-table");
   if (!state.agents.length) {
-    t.innerHTML = `<tr><td class="kv">no active agents</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">no active agents</td></tr>`;
     return;
   }
   // group into sections: one per root agent (no parent in the active list),
@@ -342,7 +374,7 @@ function showTooltip(a, x, y) {
     <div class="tt-title">${esc(a.id)} “${esc(a.name)}”</div>
     <div class="tt-row">mode ${esc(a.mode)} · status ${esc(a.status)}${a.busy ? " · busy" : ""} · inbox ${a.inbox_pending} (${a.inbox_tasks} tasks, ${a.inbox_messages} messages)</div>
     ${a.parent ? `<div class="tt-row">spawned by ${esc(a.parent)}</div>` : ""}
-    <div class="tt-row">created ${esc(fmtTime(a.created_at))}</div>
+    <div class="tt-row">created ${fmtStamp(a.created_at)}</div>
     <div class="tt-desc">${esc(a.description || "no description")}</div>`;
   t.classList.remove("hidden");
   const r = t.getBoundingClientRect();
@@ -374,7 +406,7 @@ function renderChatHeader(a) {
   title.insertAdjacentHTML("beforeend", badge(a.status));
 
   $("#chat-status").textContent =
-    `created ${fmtTime(a.created_at)} · last turn ${a.last_turn_at ? fmtTime(a.last_turn_at) : "never"} · ` +
+    `created ${fmtRel(a.created_at)} · last turn ${a.last_turn_at ? fmtRel(a.last_turn_at) : "never"} · ` +
     `inbox ${a.inbox_tasks} tasks / ${a.inbox_messages} messages` +
     (a.result ? ` · result: ${a.result.slice(0, 160)}` : "") +
     (a.error ? ` · error: ${a.error}` : "");
@@ -475,7 +507,7 @@ function appendMessage(m) {
   const box = $("#messages");
   const div = document.createElement("div");
   div.className = "msg " + (m.role || "user");
-  let html = `<div class="role">${esc(m.role)}${m.name ? " · " + esc(m.name) : ""}</div>`;
+  let html = `<div class="role"><span class="dot ${esc(m.role || "user")}"></span>${esc(m.role)}${m.name ? " · " + esc(m.name) : ""}</div>`;
   if (m.role === "assistant" && m.tool_calls) {
     html += m.content ? `<div class="md">${renderMd(m.content)}</div>` : "";
     for (const c of m.tool_calls) {
@@ -507,6 +539,24 @@ $("#send-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     $("#send-form").requestSubmit();
+  }
+});
+
+// Copy button on rendered markdown code blocks (delegated: works for live-appended messages too)
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".copy-btn");
+  if (!btn) return;
+  const code = btn.closest(".codeblock")?.querySelector("pre.code code");
+  if (!code) return;
+  const done = () => {
+    btn.textContent = "copied ✓";
+    btn.classList.add("ok");
+    setTimeout(() => { btn.textContent = "copy"; btn.classList.remove("ok"); }, 1400);
+  };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(code.textContent).then(done, () => toast("copy failed"));
+  } else {
+    toast("clipboard unavailable");
   }
 });
 
@@ -581,7 +631,7 @@ async function loadTools() {
 function renderTools() {
   const t = $("#tools-table");
   if (!state.tools.length) {
-    t.innerHTML = `<tr><td class="kv">No tools yet — agents define them as they work, or define one above.</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">No tools yet — agents define them as they work, or define one above.</td></tr>`;
     return;
   }
   t.innerHTML =
@@ -592,7 +642,7 @@ function renderTools() {
       <td>${x.disabled ? `<span class="badge disabled">disabled</span>` : `<span class="badge enabled">enabled</span>`}</td>
       <td class="mono">${x.timeout_ms ? fmtDur(x.timeout_ms) : "default"}</td>
       <td title="${esc(x.description)}">${esc(x.description)}</td>
-      <td class="mono">${esc(x.updated_at)}</td>
+      <td class="mono">${fmtStamp(x.updated_at)}</td>
     </tr>`).join("");
   $$("#tools-table tr.clickable").forEach((tr) => (tr.onclick = () => selectTool(tr.dataset.name)));
 }
@@ -786,7 +836,7 @@ async function loadRuns() {
 function renderRuns() {
   const t = $("#runs-table");
   if (!state.runs.length) {
-    t.innerHTML = `<tr><td class="kv">No background runs yet.</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">No background runs yet.</td></tr>`;
     return;
   }
   t.innerHTML =
@@ -798,7 +848,7 @@ function renderRuns() {
       <td>${badge(r.status)}</td>
       <td>${r.status === "done" ? (r.ok ? badge("ok") : badge("failed")) : ""}</td>
       <td class="mono">${fmtDur(r.duration_ms)}</td>
-      <td class="mono">${esc(r.started_at)}</td>
+      <td class="mono">${fmtStamp(r.started_at)}</td>
     </tr>`).join("");
   $$("#runs-table tr.clickable").forEach((tr) => (tr.onclick = () => selectRun(tr.dataset.id)));
 }
@@ -839,7 +889,7 @@ async function loadJobs() {
 function renderJobs() {
   const t = $("#jobs-table");
   if (!state.jobs?.length) {
-    t.innerHTML = `<tr><td class="kv">No jobs — start one from the UI, the API, or a message to the supervisor.</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">No jobs — start one from the UI, the API, or a message to the supervisor.</td></tr>`;
     return;
   }
   t.innerHTML =
@@ -942,7 +992,7 @@ async function loadSkills() {
 function renderSkills() {
   const t = $("#skills-table");
   if (!state.skills?.length) {
-    t.innerHTML = `<tr><td class="kv">No skills yet — bundle generated tools into one here.</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">No skills yet — bundle generated tools into one here.</td></tr>`;
     return;
   }
   t.innerHTML =
@@ -951,7 +1001,7 @@ function renderSkills() {
       <td class="mono">${esc(s.name)}</td>
       <td title="${esc(s.description)}">${esc(s.description)}</td>
       <td class="mono">${esc(s.tools.join(", ") || "—")}</td>
-      <td class="mono">${esc(s.updated_at)}</td>
+      <td class="mono">${fmtStamp(s.updated_at)}</td>
     </tr>`).join("");
   $$("#skills-table tr.clickable").forEach((tr) => (tr.onclick = () => selectSkill(tr.dataset.name)));
 }
@@ -1043,7 +1093,7 @@ async function loadMemory() {
 function renderMemory() {
   const t = $("#memory-table");
   if (!state.memory?.length) {
-    t.innerHTML = `<tr><td class="kv">Nothing spilled yet — long tool/run output lands here.</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">Nothing spilled yet — long tool/run output lands here.</td></tr>`;
     return;
   }
   t.innerHTML =
@@ -1054,7 +1104,7 @@ function renderMemory() {
       <td class="mono">${esc(o.tool)}</td>
       <td class="mono">${o.chars}</td>
       <td class="mono">${o.lines}</td>
-      <td class="mono">${esc(o.created_at ?? "")}</td>
+      <td class="mono">${fmtStamp(o.created_at)}</td>
     </tr>`).join("");
   $$("#memory-table tr.clickable").forEach((tr) => (tr.onclick = () => selectMemory(tr.dataset.id, 0)));
 }
@@ -1138,7 +1188,7 @@ async function loadLibs() {
 function renderLibs() {
   const t = $("#libs-table");
   if (!state.libs.length) {
-    t.innerHTML = `<tr><td class="kv">No libraries yet — agents define them with define_library, or define one above.</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">No libraries yet — agents define them with define_library, or define one above.</td></tr>`;
     return;
   }
   t.innerHTML =
@@ -1148,7 +1198,7 @@ function renderLibs() {
       <td class="mono">r${x.revision}</td>
       <td title="${esc(x.description)}">${esc(x.description)}</td>
       <td class="mono">${x.dependents} tool${x.dependents === 1 ? "" : "s"}</td>
-      <td class="mono">${esc(x.updated_at)}</td>
+      <td class="mono">${fmtStamp(x.updated_at)}</td>
     </tr>`).join("");
   $$("#libs-table tr.clickable").forEach((tr) => (tr.onclick = () => selectLib(tr.dataset.name)));
 }
@@ -1243,7 +1293,7 @@ function renderFiles(r) {
   const t = $("#files-table");
   const entries = (r.entries ?? []).filter((e) => !e.name.startsWith(".")); // hide internal dotfiles (.seven)
   if (!entries.length) {
-    t.innerHTML = `<tr><td class="kv">empty folder</td></tr>`;
+    t.innerHTML = `<tr><td class="empty">empty folder</td></tr>`;
     return;
   }
   t.innerHTML =
@@ -1254,7 +1304,7 @@ function renderFiles(r) {
       return `<tr class="clickable ${state.fileSel === rel ? "selected" : ""}" data-rel="${esc(rel)}" data-kind="${en.kind}">
         <td>${icon} ${esc(en.name)}${en.kind === "dir" ? "/" : ""}</td>
         <td class="mono">${en.kind === "dir" ? "—" : fmtBytes(en.size)}</td>
-        <td class="mono">${fmtTime(new Date(en.mtime * 1000).toISOString())}</td>
+        <td class="mono">${fmtStamp(new Date(en.mtime * 1000).toISOString())}</td>
         <td class="kv">${en.kind} <button class="btn icon small row-del" data-rel="${esc(rel)}" data-kind="${en.kind}" title="Delete">✕</button></td>
       </tr>`;
     }).join("");

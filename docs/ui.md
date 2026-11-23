@@ -29,9 +29,12 @@ devices). |
 Message bodies (conversation, inbox, outbox) are rendered as markdown by
 `seven/api/ui/markdown.js` — a small dependency-free renderer that escapes all
 HTML first, so LLM output can never inject markup. It covers headings, fenced
-code blocks, blockquotes, GFM tables, lists, links and images (non-http(s)
-URLs are dropped), plus inline code/bold/italic/strikethrough. Tool results
-stay raw monospace in a `<pre>`. |
+code blocks (with a language label and a copy button in the block header),
+blockquotes, GFM tables, lists, links and images (non-http(s) URLs are
+dropped), plus inline code/bold/italic/strikethrough. Tool results
+stay raw monospace in a `<pre>`. Message role labels carry a colored dot
+(user/assistant/tool), and table timestamps render relative ("5m ago", full
+time on hover) instead of raw ISO strings.
 
 ## Limits
 

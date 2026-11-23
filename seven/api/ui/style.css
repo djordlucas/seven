@@ -19,6 +19,7 @@
   --err: #e05d5d;
   --info: #4aa8d8;
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  --topbar-shadow: 0 8px 22px -14px rgba(0, 0, 0, 0.8);
   --backdrop: rgba(4, 6, 10, 0.66);
   --code-bg: #0a0d13;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
@@ -44,11 +45,24 @@
   --err: #cf4444;
   --info: #2b83b5;
   --shadow: 0 8px 26px rgba(30, 41, 66, 0.14);
+  --topbar-shadow: 0 8px 20px -14px rgba(30, 41, 66, 0.35);
   --backdrop: rgba(235, 238, 244, 0.7);
   --code-bg: #f0f2f7;
 }
 
 * { box-sizing: border-box; }
+
+/* global polish: selection, keyboard focus, thin scrollbars */
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 6px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--faint); border: 2px solid transparent; background-clip: padding-box; }
 
 html, body {
   margin: 0;
@@ -64,6 +78,23 @@ html, body {
 .mono { font-family: var(--mono); font-size: 12px; }
 .hidden { display: none !important; }
 
+/* relative timestamp chip ("5m ago", full time on hover) */
+.stamp { color: var(--faint); white-space: nowrap; cursor: default; }
+
+/* buttons, tabs and inputs ease between states and give a subtle press */
+.btn, .nav-btn, .tab, .subtabs .tab, .copy-btn {
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease,
+    filter 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease;
+}
+.btn:active:not(:disabled), .nav-btn:active, .tab:active, .subtabs .tab:active { transform: scale(0.97); }
+input[type="text"], input[type="number"], input:not([type]), select, textarea {
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 /* ── top bar: nav left, instance centered, controls right ── */
 
 .topbar {
@@ -78,6 +109,7 @@ html, body {
   height: 54px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  box-shadow: var(--topbar-shadow);
 }
 
 .topbar-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
@@ -224,6 +256,10 @@ select { width: auto; }
 .list tr.clickable:hover td { background: var(--surface-2); }
 .list tr.selected td { background: var(--accent-soft); }
 .list td.mono { font-size: 12px; }
+.list td.empty {
+  text-align: center; color: var(--faint); font-size: 12.5px;
+  padding: 26px 12px; border-bottom: 0;
+}
 
 /* ── badges ──────────────────────────────────────────────── */
 
@@ -306,9 +342,15 @@ select { width: auto; }
   font-size: 13px;
 }
 .msg .role {
+  display: flex; align-items: center; gap: 6px;
   font-family: var(--mono); font-size: 10px; letter-spacing: 1px;
   text-transform: uppercase; color: var(--faint); margin-bottom: 4px;
 }
+.msg .role .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+.msg .role .dot.user { background: var(--accent); }
+.msg .role .dot.assistant { background: var(--ok); }
+.msg .role .dot.tool { background: var(--info); }
+.msg .role .dot.system { background: var(--faint); }
 .msg.user { align-self: flex-end; background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .msg.assistant { align-self: flex-start; }
 .msg.system { align-self: center; color: var(--dim); font-size: 12px; background: transparent; border-style: dashed; }
@@ -340,9 +382,30 @@ select { width: auto; }
   background: var(--code-bg); border: 1px solid var(--border);
   border-radius: 5px; padding: 1px 5px;
 }
+/* fenced code blocks: header bar with language label + copy button */
+.md .codeblock {
+  margin: 8px 0; background: var(--code-bg);
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.md .code-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 3px 6px 3px 12px;
+  background: var(--surface-3); border-bottom: 1px solid var(--border);
+}
+.md .code-lang {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 1px; color: var(--faint);
+}
+.md .copy-btn {
+  border: 1px solid var(--border-strong); background: transparent; color: var(--dim);
+  font-family: var(--mono); font-size: 10.5px; border-radius: 6px;
+  padding: 2px 9px; cursor: pointer; line-height: 1.5;
+}
+.md .copy-btn:hover { color: var(--text); background: var(--surface-2); }
+.md .copy-btn.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
 .md pre.code {
-  margin: 8px 0; background: var(--code-bg); border: 1px solid var(--border);
-  border-radius: 8px; padding: 9px 11px; overflow: auto; max-height: 340px;
+  margin: 0; background: var(--code-bg); border: 0; border-radius: 0;
+  padding: 9px 11px; overflow: auto; max-height: 340px;
 }
 .md pre.code code { background: none; border: 0; padding: 0; font-size: 11.5px; }
 .md blockquote {
@@ -392,7 +455,9 @@ textarea.file-editor {
   border: 1px solid var(--border-strong); border-radius: 10px;
   box-shadow: var(--shadow); padding: 10px 12px;
   font-size: 12.5px; pointer-events: none;
+  animation: ttin 0.12s ease-out;
 }
+@keyframes ttin { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .tooltip .tt-title { font-family: var(--mono); font-size: 12px; margin-bottom: 4px; }
 .tooltip .tt-row { color: var(--dim); font-size: 11.5px; margin-top: 2px; }
 .tooltip .tt-desc { margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
@@ -445,7 +510,9 @@ textarea.file-editor {
   background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: 14px; box-shadow: var(--shadow);
   width: min(680px, 100%); padding: 16px 20px 18px;
+  animation: modalin 0.14s ease-out;
 }
+@keyframes modalin { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
 .modal-head { margin-bottom: 4px; }
 .modal-head h3 { font-size: 15px; }
 .modal-body { max-height: 62vh; overflow-y: auto; padding-right: 4px; }

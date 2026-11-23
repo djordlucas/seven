@@ -79,7 +79,13 @@
         i++;
         while (i < raw.length && !/^```\s*$/.test(raw[i])) buf.push(raw[i++]);
         i++; // closing fence (or EOF)
-        out.push('<pre class="code"><code' + (lang ? ' class="language-' + esc(lang) + '"' : "") + ">" + esc(buf.join("\n")) + "</code></pre>");
+        out.push(
+          '<div class="codeblock">' +
+            '<div class="code-head"><span class="code-lang">' + (lang ? esc(lang) : "code") + "</span>" +
+            '<button type="button" class="copy-btn" title="Copy code">copy</button></div>' +
+            '<pre class="code"><code' + (lang ? ' class="language-' + esc(lang) + '"' : "") + ">" + esc(buf.join("\n")) + "</code></pre>" +
+          "</div>"
+        );
         continue;
       }
 
