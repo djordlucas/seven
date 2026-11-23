@@ -260,6 +260,8 @@ select { width: auto; }
   text-align: center; color: var(--faint); font-size: 12.5px;
   padding: 26px 12px; border-bottom: 0;
 }
+/* inline value preview in the KV table: single line, dim, ellipsized by the cell */
+.list td.kv-preview { color: var(--faint); font-size: 12px; white-space: nowrap; }
 
 /* ── badges ──────────────────────────────────────────────── */
 
@@ -587,7 +589,8 @@ textarea.file-editor {
   #files-table th:nth-child(1) { width: 56% !important; }
   #files-table th:nth-child(2) { width: 18% !important; }
   #kv-table th:nth-child(3), #kv-table td:nth-child(3),
-  #kv-table th:nth-child(4), #kv-table td:nth-child(4) { display: none; }
+  #kv-table th:nth-child(4), #kv-table td:nth-child(4),
+  #kv-table th:nth-child(5), #kv-table td:nth-child(5) { display: none; }
   #kv-table th:nth-child(1) { width: 30% !important; }
   #kv-table th:nth-child(2) { width: 52% !important; }
   #memory-table th:nth-child(4), #memory-table td:nth-child(4),

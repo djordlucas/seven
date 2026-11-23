@@ -1165,10 +1165,11 @@ function renderKV() {
     return;
   }
   t.innerHTML =
-    `<tr><th style="width:16%">agent</th><th style="width:32%">key</th><th style="width:9%">chars</th><th style="width:16%">updated</th><th></th></tr>` +
+    `<tr><th style="width:13%">agent</th><th style="width:20%">key</th><th>value preview</th><th style="width:8%">chars</th><th style="width:14%">updated</th><th></th></tr>` +
     state.kv.map((k) => `<tr class="clickable ${state.kvSel === k.agent + "/" + k.key ? "selected" : ""}" data-agent="${esc(k.agent)}" data-key="${esc(k.key)}">
       <td class="mono">${esc(k.agent)}</td>
-      <td class="mono" title="${esc((k.preview || "").replace(/\n/g, " "))}">${esc(k.key)}</td>
+      <td class="mono">${esc(k.key)}</td>
+      <td class="kv-preview" title="${esc((k.preview || "").replace(/\n/g, " "))}">${esc((k.preview || "").replace(/\n/g, " ⏎ "))}${k.chars > 80 ? " …" : ""}</td>
       <td class="mono">${k.chars}</td>
       <td class="mono">${fmtStamp(k.updated_at)}</td>
       <td><button class="btn icon small row-del" data-agent="${esc(k.agent)}" data-key="${esc(k.key)}" title="Delete">✕</button></td>
