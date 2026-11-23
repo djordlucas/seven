@@ -29,8 +29,19 @@ class DefineToolRequest(BaseModel):
     parameters: dict = Field(default_factory=lambda: {"type": "object"})
     code: str
     deps: dict[str, str] | None = None
+    libs: list[str] | None = None
     test_args: dict | None = None
     timeout_ms: int | None = None
+
+
+class DefineLibRequest(BaseModel):
+    name: str
+    description: str = ""
+    code: str
+
+
+class RebundleRequest(BaseModel):
+    libs: list[str] | None = None
 
 
 class DisableRequest(BaseModel):

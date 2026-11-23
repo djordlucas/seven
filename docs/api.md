@@ -28,7 +28,8 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `POST /api/agents/{id}/compact` | Compact the conversation now; 409 when there is nothing to fold. |
 | `DELETE /api/agents/{id}/conversation` | Clear the conversation and summary. |
 | `GET /api/tools` | Generated tools with revision, state, run limit. |
-| `POST /api/tools` | Define one: `name`, `description`, `parameters`, `code`, optional `deps`, `test_args`, `timeout_ms`. Runs the trial first when `test_args` is set. 400 on a bad name, syntax error or failed trial. |
+| `POST /api/tools` | Define one: `name`, `description`, `parameters`, `code`, optional `deps`, `libs` (`["name"]` or `["name@rev"]` — bundled and pinned per revision), `test_args`, `timeout_ms`. Runs the trial first when `test_args` is set. 400 on a bad name, unknown library, syntax error or failed trial. |
+| `POST /api/tools/{name}/rebundle` | Re-pin the tool's libraries (default: latest revision of each current pin), trial-run against the new bundle when `test_args` was stored, and update the pins only if the trial passes. |
 | `GET /api/tools/{name}` | Definition and source, plus the skills using it. |
 | `DELETE /api/tools/{name}` | Delete it and its history; 409 naming the skills while one uses it. |
 | `POST /api/tools/{name}/disable` | `{"reason"}`; calls are refused while disabled. |
@@ -53,6 +54,11 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 | `POST /api/skills/{name}/unload?agent=a1` | Unload it from one agent. |
 | `GET /api/memory` | Spilled outputs, newest first: id, agent, tool, path, chars, lines. |
 | `GET /api/memory/{oid}?offset=&limit=` | One spilled output as a character window: `chunk`, `total_chars`, `next_offset`. |
+| `GET /api/libs` | Generated libraries with revision and dependent-tool count. |
+| `POST /api/libs` | Define one: `name`, `description`, `code`. Each save is a new revision; 400 on a bad name or syntax error. |
+| `GET /api/libs/{name}` | One library: meta, source, and `dependents` (tool, tool revision, pinned lib revision). |
+| `DELETE /api/libs/{name}?force=` | Delete; 409 listing the bundling tools unless `force=true` (force strips their pins). |
+| `POST /api/libs/{name}/revalidate?libs=&apply=` | Rebundle every dependent tool against the latest (or given) revisions; `apply=false` is a dry run. |
 | `GET /api/logs?agent=&turn=&run=&level=&grep=&tail=` | Structured log lines, filtered (`logging.md`). |
 | `GET /api/events?agent=` | SSE stream of agent events (below). |
 | `GET /api/files/list?rel=` | List a workspace folder (`entries`: name, kind, size, mtime; dirs first) or stat one file. |
@@ -66,6 +72,20 @@ Interactive docs (OpenAPI) are at `/docs` while the server runs.
 
 All `/api/files` paths are relative to the workspace root and resolved before
 use — anything escaping it (`..`, absolute paths, symlinks out) gets a 400.
+
+## Libraries and bundling
+
+A **library** is a generated shared module (`POST /api/libs`, or the
+`define_library` builtin); every definition is a new revision and every
+revision's source is kept (`.seven/libs/<name>/r<N>.py`). A tool declares
+`libs: ["mathx", "helpers@2"]` when defined; those exact revisions are recorded
+in the tool's manifest and passed to every run, where the child process serves
+`import <name>` from the pinned revision files via an import hook. Redefining a
+library therefore never changes what an existing tool imports. To adopt a new
+revision safely, `rebundle_tool` / `POST /api/tools/{name}/rebundle` re-pins to
+the latest (or given) revisions, trial-runs the tool against the new bundle
+(with the stored `test_args`), and keeps the new pins only if the trial passes.
+`POST /api/libs/{name}/revalidate` does this for every dependent tool at once.
 
 Errors are `{"detail": "…"}` with a 4xx status.
 

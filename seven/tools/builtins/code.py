@@ -7,6 +7,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from ..bundle import format_report, rebundle, trial_with_libs
 from ..store import TOOL_NAME
 from .shared import (
     DEPS_SCHEMA,
@@ -50,7 +51,9 @@ def code_builtins(is_builtin) -> list:
                     "parameters": {"type": "object", "description": "JSON Schema for the arguments object."},
                     "code": {"type": "string", "description": "Python module source."},
                     "deps": DEPS_SCHEMA,
-                    "test_args": {"type": "object", "description": "Arguments for a trial run before saving."},
+                    "libs": {"type": "array", "items": {"type": "string"},
+                             "description": 'Generated libraries to bundle with this tool: "name" (its latest revision) or "name@rev" to pin an exact one. The pins are recorded in the tool and used for every run, so later library changes cannot break this tool. Imports of these names come from the bundle, not pip.'},
+                    "test_args": {"type": "object", "description": "Arguments for a trial run before saving. Stored, so rebundle_tool can re-trial later."},
                     "timeout_ms": {"type": "integer", "description": "Run limit for this tool, for one that is meant to be slow. Defaults to the normal run limit."},
                 },
                 "required": ["name", "description", "parameters", "code"],
@@ -89,6 +92,49 @@ def code_builtins(is_builtin) -> list:
             parameters={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
             run=_enable_tool,
         ),
+        Builtin(
+            name="define_library",
+            description="Create or replace a generated library: a shared Python module that tools bundle and import by name "
+                        "(`import <name>` works inside tool code). Each definition is a new revision; tools keep the revision "
+                        "they pinned, so redefining a library never breaks them — use rebundle_tool to adopt a new revision.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": f"snake_case, matching {TOOL_NAME.pattern}."},
+                    "description": {"type": "string", "description": "What the library provides; shown to every agent."},
+                    "code": {"type": "string", "description": "Python module source; its top-level names are the library's API."},
+                },
+                "required": ["name", "description", "code"],
+            },
+            run=_define_library,
+        ),
+        Builtin(
+            name="read_library",
+            description="Show a library: its definition, current revision and source, plus which tools bundle it (and at which revision).",
+            parameters={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+            run=_read_library,
+        ),
+        Builtin(
+            name="delete_library",
+            description="Delete a library. Refused while any tool bundles it — rebundle those tools without it first, or force.",
+            parameters={"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean"}}, "required": ["name"]},
+            run=_delete_library,
+        ),
+        Builtin(
+            name="rebundle_tool",
+            description="Re-pin a tool's bundled libraries to their latest revisions (or to the given \"name@rev\" specs) and trial-run "
+                        "the tool against the new bundle. The new pins are kept only if the trial succeeds — this is how a tool safely "
+                        "adopts a changed library.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The tool to rebundle."},
+                    "libs": {"type": "array", "items": {"type": "string"}, "description": 'Optional explicit pins, e.g. ["mathx@3"]. Default: latest revision of each library the tool already bundles.'},
+                },
+                "required": ["name"],
+            },
+            run=_rebundle_tool,
+        ),
     ]
 
 
@@ -107,13 +153,23 @@ def _define_tool(is_builtin):
         source = str(a.get("code", ""))
         deps = as_deps(a.get("deps")) or {}
         timeout_ms = positive(a.get("timeout_ms"), 0) or None
+        lib_specs = a.get("libs") or []
+        pins = []
+        if lib_specs:
+            if ctx.libstore is None:
+                return "error: no library store on this agent"
+            try:
+                pins = ctx.libstore.resolve([str(x) for x in lib_specs])
+            except ValueError as e:
+                return f"error: {e}"
         try:
-            packages = await ctx.runner.install(source, deps, ctx.log)
+            packages = await ctx.runner.install(source, deps, ctx.log, skip={p["name"] for p in pins})
         except Exception as err:
             return f"error: {err}"
         trial = ""
         if a.get("test_args") is not None:
-            r = await _trial_run(ctx, name, source, a["test_args"], timeout_ms)
+            lmap = ctx.libstore.libs_map(pins) if pins and ctx.libstore else None
+            r = await trial_with_libs(ctx, name, source, a["test_args"], timeout_ms, lmap)
             if not r.ok:
                 ctx.log.info("tool not saved: trial run failed", tool=name, error=(r.error or "").split("\n")[0])
                 return f"not saved: the trial run failed\n{format_run(r)}"
@@ -122,20 +178,69 @@ def _define_tool(is_builtin):
             name=name, description=str(a.get("description", "")),
             parameters=a.get("parameters") if isinstance(a.get("parameters"), dict) else {"type": "object"},
             deps=deps, packages=packages, source=source, timeout_ms=timeout_ms,
+            libs=pins, test_args=a.get("test_args"),
         )
-        ctx.log.info("tool saved", tool=name, revision=meta["revision"], packages=[p["name"] for p in packages])
-        return f"saved {name} (revision {meta['revision']}){trial}"
+        bundled = f"\nbundled libs: " + ", ".join(f'{p["name"]}@r{p["revision"]}' for p in pins) if pins else ""
+        ctx.log.info("tool saved", tool=name, revision=meta["revision"], packages=[p["name"] for p in packages],
+                     libs=[p["name"] for p in pins])
+        return f"saved {name} (revision {meta['revision']}){bundled}{trial}"
     return run
 
 
-async def _trial_run(ctx: BuiltinContext, name: str, source: str, args: object, timeout_ms: int | None):
-    dir_ = Path(tempfile.mkdtemp(prefix=f"trial-{name}-", dir=ctx.runner.tmp))
-    file = dir_ / "source.py"
-    file.write_text(source, encoding="utf-8")
+async def _trial_run(ctx: BuiltinContext, name: str, source: str, args: object, timeout_ms: int | None,
+                     libs: dict[str, str] | None = None):
+    return await trial_with_libs(ctx, name, source, args, timeout_ms, libs)
+
+
+async def _define_library(a: dict, ctx: BuiltinContext) -> str:
+    if ctx.libstore is None:
+        return "error: no library store on this agent"
+    name = str(a.get("name", ""))
     try:
-        return await ctx.runner.run_file(file, args, timeout_ms, ctx.log.child(tool=name, mode="trial"))
-    finally:
-        shutil.rmtree(dir_, ignore_errors=True)
+        meta = ctx.libstore.save(name=name, description=str(a.get("description", "")), source=str(a.get("code", "")))
+    except ValueError as e:
+        return f"error: {e}"
+    except SyntaxError as e:
+        return f"error: syntax error: {e}"
+    ctx.log.info("library saved", lib=name, revision=meta["revision"])
+    return f'saved library {name} (revision {meta["revision"]})'
+
+
+async def _read_library(a: dict, ctx: BuiltinContext) -> str:
+    if ctx.libstore is None:
+        return "error: no library store on this agent"
+    name = str(a.get("name", ""))
+    lib = ctx.libstore.get(name)
+    if not lib:
+        return f'error: no library named "{name}"'
+    deps = ctx.libstore.dependents(name) if ctx.libstore.tools else []
+    dep_line = ", ".join(f'{d["tool"]} (lib r{d["lib_revision"]})' for d in deps) or "none"
+    return f"{json.dumps(lib['meta'], indent=2, default=str)}\nbundled by: {dep_line}\n\n--- source ---\n{lib['source']}"
+
+
+async def _delete_library(a: dict, ctx: BuiltinContext) -> str:
+    if ctx.libstore is None:
+        return "error: no library store on this agent"
+    from ..store import LibInUseError
+    name = str(a.get("name", ""))
+    try:
+        removed = ctx.libstore.remove(name, force=bool(a.get("force")))
+    except LibInUseError as err:
+        return f"error: {err}"
+    if not removed:
+        return f'error: no library named "{name}"'
+    ctx.log.info("library deleted", lib=name)
+    return f"deleted library {name}"
+
+
+async def _rebundle_tool(a: dict, ctx: BuiltinContext) -> str:
+    name = str(a.get("name", ""))
+    specs = [str(x) for x in a["libs"]] if a.get("libs") else None
+    try:
+        report = await rebundle(ctx, name, specs)
+    except ValueError as e:
+        return f"error: {e}"
+    return format_report(report)
 
 
 async def _read_tool(a: dict, ctx: BuiltinContext) -> str:

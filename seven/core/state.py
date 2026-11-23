@@ -282,6 +282,27 @@ MIGRATIONS = [
       VALUES ('supervisor', 'supervisor', 'The supervisor; message it to control jobs and read system status.', NULL, 'supervisor', 'idle', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
     INSERT OR IGNORE INTO meta (key, value) VALUES ('job_seq', '0');
     """,
+    # 3: generated libraries (libs + per-revision sources) and per-tool pinned
+    #    dependency manifests (tools.libs) plus stored trial args (tools.test_args).
+    """
+    CREATE TABLE IF NOT EXISTS libs (
+      name TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS lib_revs (
+      name TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      at TEXT NOT NULL,
+      PRIMARY KEY (name, revision)
+    );
+    ALTER TABLE tools ADD COLUMN libs TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE tools ADD COLUMN test_args TEXT;
+    """,
 ]
 
 SCHEMA_VERSION = len(MIGRATIONS) + 1

@@ -70,17 +70,35 @@
 
   <!-- ── Tools ──────────────────────────────────────────────────── -->
   <section id="view-tools" class="view">
-    <div class="panel">
-      <div class="panel-head">
-        <h2>Generated tools</h2>
-        <div class="actions">
-          <button id="btn-exec" class="btn">Run Python</button>
-          <button id="btn-define" class="btn primary">+ Define tool</button>
-        </div>
-      </div>
-      <table class="list" id="tools-table"></table>
+    <div class="subtabs">
+      <button class="tab active" data-tools-tab="tools">Tools</button>
+      <button class="tab" data-tools-tab="libs">Libraries</button>
     </div>
-    <div id="tool-detail" class="panel detail hidden"></div>
+    <div id="tools-pane">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Generated tools</h2>
+          <div class="actions">
+            <button id="btn-exec" class="btn">Run Python</button>
+            <button id="btn-define" class="btn primary">+ Define tool</button>
+          </div>
+        </div>
+        <table class="list" id="tools-table"></table>
+      </div>
+      <div id="tool-detail" class="panel detail hidden"></div>
+    </div>
+    <div id="libs-pane" class="hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Generated libraries</h2>
+          <div class="actions">
+            <button id="btn-define-lib" class="btn primary">+ Define library</button>
+          </div>
+        </div>
+        <table class="list" id="libs-table"></table>
+      </div>
+      <div id="lib-detail" class="panel detail hidden"></div>
+    </div>
   </section>
 
   <!-- ── Files (workspace file manager) ────────────────────────── -->

@@ -62,6 +62,10 @@ class Config:
         return self.home / "tools"
 
     @property
+    def libs_dir(self) -> Path:
+        return self.home / "libs"
+
+    @property
     def tmp_dir(self) -> Path:
         return self.home / "tmp"
 

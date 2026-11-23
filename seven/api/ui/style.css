@@ -197,6 +197,14 @@ select { width: auto; }
 
 .kv { color: var(--dim); font-size: 12px; }
 
+/* pinned-library chips (tool detail, library detail) */
+.pin {
+  display: inline-block; font-family: var(--mono); font-size: 11px;
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  color: var(--info); border-radius: 999px; padding: 1px 9px; margin: 0 3px 3px 0;
+  white-space: nowrap;
+}
+
 /* ── tables ──────────────────────────────────────────────── */
 
 .list { width: 100%; border-collapse: collapse; table-layout: fixed; }

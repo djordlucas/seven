@@ -31,7 +31,7 @@ def agent_view(app: SevenApp, row: AgentRow) -> dict:
 
 
 def api_ctx(seven: SevenApp) -> BuiltinContext:
-    return BuiltinContext(agent_id="user", runner=seven.runner, store=seven.store,
+    return BuiltinContext(agent_id="user", runner=seven.runner, store=seven.store, libstore=seven.libstore,
                           runs=seven.supervisor.runs, supervisor=seven.supervisor, state=seven.state,
                           workspace=str(seven.config.workspace), state_db=seven.state.path,
                           abort=None, log=seven.log.child(agent="user"))

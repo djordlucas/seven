@@ -12,7 +12,10 @@ const state = {
   selectedAgent: null,
   mailTab: "chat",
   tools: [],
+  libs: [],
   selectedTool: null,
+  selectedLib: null,
+  toolsTab: "tools",
   jobs: [],
   skills: [],
   memory: [],
@@ -137,7 +140,7 @@ function confirmModal(title, text, onYes) {
 
 const loaders = {
   agents: null, // loaded explicitly
-  tools: () => loadTools(),
+  tools: () => { loadTools(); loadLibs(); },
   files: () => loadFiles(),
   activity: () => { loadRuns(); if (state.subtab === "logs") loadLogs(); },
   jobs: () => loadJobs(),
@@ -154,8 +157,16 @@ $$(".nav-btn").forEach((b) => (b.onclick = () => {
   else loaders[state.view]?.();
 }));
 
-$$(".subtabs .tab").forEach((b) => (b.onclick = () => {
-  $$(".subtabs .tab").forEach((x) => x.classList.toggle("active", x === b));
+$$(".subtabs .tab[data-tools-tab]").forEach((b) => (b.onclick = () => {
+  $$(".subtabs .tab[data-tools-tab]").forEach((x) => x.classList.toggle("active", x === b));
+  state.toolsTab = b.dataset.toolsTab;
+  $("#tools-pane").classList.toggle("hidden", state.toolsTab !== "tools");
+  $("#libs-pane").classList.toggle("hidden", state.toolsTab !== "libs");
+  if (state.toolsTab === "libs") loadLibs();
+}));
+
+$$(".subtabs .tab[data-subtab]").forEach((b) => (b.onclick = () => {
+  $$(".subtabs .tab[data-subtab]").forEach((x) => x.classList.toggle("active", x === b));
   state.subtab = b.dataset.subtab;
   $("#subtab-runs").classList.toggle("hidden", state.subtab !== "runs");
   $("#subtab-logs").classList.toggle("hidden", state.subtab !== "logs");
@@ -611,6 +622,9 @@ async function selectTool(name) {
       <div class="kv">${esc(meta.description)}</div>
       ${meta.disabled ? `<div class="kv">disabled: ${esc(meta.disabled.reason)} (${esc(meta.disabled.at)})</div>` : ""}
       ${t.used_by_skills?.length ? `<div class="kv">used by skills: ${esc(t.used_by_skills.join(", "))}</div>` : ""}
+      ${meta.libs?.length
+        ? `<div class="kv">bundled libraries: ${meta.libs.map((l) => `<span class="pin">${esc(l.name)}@r${l.revision}</span>`).join(" ")} <button class="btn small" id="td-rebundle" title="Re-pin to the libraries' latest revisions, trial-run, keep the new pins only if the trial passes">rebundle</button></div>`
+        : `<div class="kv">bundled libraries: none</div>`}
       <label>parameters (JSON Schema)</label><pre>${esc(pretty(meta.parameters))}</pre>
       <label>source</label><pre>${esc(t.source)}</pre>
       <label>health</label><pre>${esc(h.report)}</pre>`;
@@ -634,6 +648,15 @@ async function selectTool(name) {
       try {
         await api("POST", `/api/tools/${name}/enable`);
         toast(`enabled ${name}`, true);
+        selectTool(name);
+        loadTools();
+      } catch (e) { toast(String(e)); }
+    });
+    $("#td-rebundle")?.addEventListener("click", async () => {
+      try {
+        const r = await api("POST", `/api/tools/${name}/rebundle`, {});
+        const pins = (r.to || []).map((l) => `${l.name}@r${l.revision}`).join(", ") || "none";
+        toast(r.updated ? `rebundled ${name} -> ${pins}` : `${name}: not updated${r.trial && !r.trial.ok ? " (trial failed)" : " (already up to date)"}`, r.updated);
         selectTool(name);
         loadTools();
       } catch (e) { toast(String(e)); }
@@ -689,6 +712,7 @@ $("#btn-define").onclick = () => {
       <div class="full"><label>parameters (JSON Schema)</label><textarea id="d-params" rows="3">{"type":"object"}</textarea></div>
       <div class="full"><label>code (module source; <code>default(args)</code> returns the result)</label><textarea id="d-code" rows="9">def default(args):\n    return ...</textarea></div>
       <div><label>deps (JSON of pip packages, optional)</label><input id="d-deps" placeholder='{"requests": ">=2"}'></div>
+      <div><label>libs (comma-separated libraries to bundle, optional)</label><input id="d-libs" placeholder="mathx, helpers@2"></div>
       <div><label>test_args (JSON, optional trial run)</label><input id="d-testargs" placeholder="{}"></div>
     </div>`, [
     { label: "Cancel", onClick: () => {} },
@@ -710,6 +734,7 @@ $("#btn-define").onclick = () => {
         parameters,
         code: $("#d-code").value,
         deps,
+        libs: $("#d-libs").value.split(",").map((x) => x.trim()).filter(Boolean),
         test_args,
         timeout_ms: $("#d-timeout").value ? Number($("#d-timeout").value) : null,
       });
@@ -1100,6 +1125,96 @@ async function loadConfig() {
   } catch (e) { toast(String(e)); }
 }
 
+
+/* ── libraries (generated, bundled into tools with pinned revisions) ── */
+
+async function loadLibs() {
+  try {
+    state.libs = await api("GET", "/api/libs");
+    renderLibs();
+  } catch (e) { toast(String(e)); }
+}
+
+function renderLibs() {
+  const t = $("#libs-table");
+  if (!state.libs.length) {
+    t.innerHTML = `<tr><td class="kv">No libraries yet — agents define them with define_library, or define one above.</td></tr>`;
+    return;
+  }
+  t.innerHTML =
+    `<tr><th style="width:22%">name</th><th style="width:7%">rev</th><th>description</th><th style="width:14%">bundled by</th><th style="width:15%">updated</th></tr>` +
+    state.libs.map((x) => `<tr class="clickable ${state.selectedLib === x.name ? "selected" : ""}" data-name="${esc(x.name)}">
+      <td class="mono">${esc(x.name)}</td>
+      <td class="mono">r${x.revision}</td>
+      <td title="${esc(x.description)}">${esc(x.description)}</td>
+      <td class="mono">${x.dependents} tool${x.dependents === 1 ? "" : "s"}</td>
+      <td class="mono">${esc(x.updated_at)}</td>
+    </tr>`).join("");
+  $$("#libs-table tr.clickable").forEach((tr) => (tr.onclick = () => selectLib(tr.dataset.name)));
+}
+
+async function selectLib(name) {
+  state.selectedLib = name;
+  renderLibs();
+  try {
+    const lib = await api("GET", `/api/libs/${name}`);
+    const d = $("#lib-detail");
+    d.classList.remove("hidden");
+    const meta = lib.meta;
+    const deps = lib.dependents?.length
+      ? lib.dependents.map((x) => `<span class="pin">${esc(x.tool)}@lib-r${x.lib_revision}</span>`).join(" ")
+      : `<span class="kv">none</span>`;
+    d.innerHTML = `
+      <div class="panel-head">
+        <h3 class="mono">${esc(meta.name)} <span class="kv">r${meta.revision}</span></h3>
+        <div class="actions">
+          <button class="btn small" id="ld-revalidate" title="Rebundle every dependent tool against this library's latest revision (trial-run first)">Revalidate dependents</button>
+          <button class="btn small danger" id="ld-delete">Delete</button>
+        </div>
+      </div>
+      <div class="kv">${esc(meta.description)}</div>
+      <div class="kv">bundled by: ${deps}</div>
+      <label>source</label><pre>${esc(lib.source)}</pre>`;
+    $("#ld-revalidate").onclick = async () => {
+      try {
+        const r = await api("POST", `/api/libs/${name}/revalidate`);
+        const lines = (r.results || []).map((x) =>
+          `${x.tool}: ${x.updated ? "rebundled to " + (x.to || []).map((l) => `${l.name}@r${l.revision}`).join(", ") : (x.error ? "error: " + x.error : "not updated (trial failed)")}`);
+        toast(lines.join("\n") || "no dependents", true);
+        selectLib(name);
+        loadLibs();
+        loadTools();
+      } catch (e) { toast(String(e)); }
+    };
+    $("#ld-delete").onclick = () => confirmModal("Delete library", `Delete ${name}? Tools that bundle it block deletion (rebundle them away first, or force).`, async () => {
+      await api("DELETE", `/api/libs/${name}?force=true`);
+      toast(`deleted ${name}`, true);
+      state.selectedLib = null;
+      $("#lib-detail").classList.add("hidden");
+      loadLibs();
+      loadTools();
+    });
+  } catch (e) { toast(String(e)); }
+}
+
+$("#btn-define-lib").onclick = () => {
+  openModal("Define library", `
+    <div class="form-grid">
+      <div class="full"><label>Name (snake_case; tools do <code>import &lt;name&gt;</code>)</label><input id="l-name" placeholder="mathx"></div>
+      <div class="full"><label>Description (what it provides; shown to every agent)</label><input id="l-description"></div>
+      <div class="full"><label>code (module source; top-level names are the API)</label><textarea id="l-code" rows="9">def helper(x):\n    return ...</textarea></div>
+    </div>`, [
+    { label: "Cancel", onClick: () => {} },
+    { label: "Save", primary: true, onClick: async () => {
+      const name = $("#l-name").value.trim();
+      if (!name) { toast("name is required"); return false; }
+      const m = await api("POST", "/api/libs", { name, description: $("#l-description").value, code: $("#l-code").value });
+      toast(`saved library ${m.name} r${m.revision}`, true);
+      loadLibs();
+    } },
+  ]);
+};
+
 /* ── files (workspace file manager) ────────────────────────── */
 
 const joinPath = (dir, name) => (dir ? `${dir}/${name}` : name);
@@ -1301,6 +1416,7 @@ loadAgents();
 setInterval(() => {
   refreshHealth();
   if (state.view === "agents") loadAgents();
+  else if (state.view === "tools") { loadTools(); loadLibs(); }
   else if (state.view === "activity") { loadRuns(); if (state.subtab === "logs" && state.logsFollow) loadLogs(); }
   else if (state.view === "jobs") loadJobs();
   else if (state.view === "skills") loadSkills();

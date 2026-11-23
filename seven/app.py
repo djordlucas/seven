@@ -12,7 +12,7 @@ from .core.llm import ChatModel, Mistral
 from .core.log import Logger
 from .core.state import State
 from .execution.runner import Runner
-from .tools import ToolStore
+from .tools import LibStore, ToolStore
 
 LEASE_HEARTBEAT_S = 5
 
@@ -25,16 +25,18 @@ class SevenApp:
         self.log = Logger(level=cfg.log_level, file=cfg.log_file, stderr=stderr)
         cfg.home.mkdir(parents=True, exist_ok=True)
         cfg.tools_dir.mkdir(parents=True, exist_ok=True)
+        cfg.libs_dir.mkdir(parents=True, exist_ok=True)
         cfg.tmp_dir.mkdir(parents=True, exist_ok=True)
         self.state = State(cfg.state_db)
         self.store = ToolStore(self.state, cfg.tools_dir)
+        self.libstore = LibStore(self.state, cfg.libs_dir, tool_store=self.store)
         self.model: ChatModel = model or Mistral(api_key=cfg.api_key, model=cfg.model, endpoint=cfg.endpoint,
                                                  concurrency=cfg.llm_concurrency)
         self.runner = Runner(home=cfg.home, cwd=str(cfg.workspace), timeout_ms=cfg.run_timeout_ms,
                              memory_mb=cfg.run_memory_mb, host={"llm": {"chat": self._host_llm_chat}}, log=self.log)
         self._subscribers: set[asyncio.Queue] = set()
         self.supervisor = Supervisor(SupervisorOpts(
-            state=self.state, store=self.store, runner=self.runner, model=self.model,
+            state=self.state, store=self.store, libstore=self.libstore, runner=self.runner, model=self.model,
             workspace=str(cfg.workspace), max_steps=cfg.max_steps, context_tokens=cfg.context_tokens,
             max_agents=cfg.max_agents, spill_chars=cfg.spill_chars, memory_dir=cfg.memory,
             delegate_timeout_s=cfg.delegate_timeout_s, core_tools=cfg.core_tools,

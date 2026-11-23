@@ -23,7 +23,7 @@ from ..core.log import Logger, noop_logger, preview
 from ..core.state import ROOT_ID, SUPERVISOR, TERMINAL, AgentRow, State, now_iso
 from ..execution.runner import Runner
 from ..execution.runs import RunTable
-from ..tools.store import ToolStore
+from ..tools.store import LibStore, ToolStore
 from .agent import Agent
 from .commands import CommandMixin
 from .errors import RefusedError
@@ -51,6 +51,7 @@ class SupervisorOpts:
     tool_discovery: bool = True
     on_event: Callable[[dict], None] | None = None
     log: Logger = noop_logger
+    libstore: LibStore | None = None
 
 
 class Supervisor(CommandMixin, JobMixin):
@@ -350,7 +351,7 @@ class Supervisor(CommandMixin, JobMixin):
 
 def _agent_deps(opts: SupervisorOpts, supervisor: Supervisor, runs: RunTable, agent_id: str):
     from .agent import AgentDeps
-    return AgentDeps(state=opts.state, store=opts.store, runner=opts.runner, runs=runs, model=opts.model,
+    return AgentDeps(state=opts.state, store=opts.store, libstore=opts.libstore, runner=opts.runner, runs=runs, model=opts.model,
                      supervisor=supervisor, workspace=opts.workspace, max_steps=opts.max_steps,
                      context_tokens=opts.context_tokens, spill_chars=opts.spill_chars, memory_dir=opts.memory_dir,
                      core_tools=opts.core_tools, tool_discovery=opts.tool_discovery,

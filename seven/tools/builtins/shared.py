@@ -14,7 +14,7 @@ from ...core.log import Logger
 from ...core.state import State, now_iso
 from ...execution.runner import RunHandle, Runner, RunResult
 from ...execution.runs import RunTable
-from ..store import ToolStore
+from ..store import LibStore, ToolStore
 
 if TYPE_CHECKING:
     from ...agent.supervisor import Supervisor
@@ -37,6 +37,7 @@ class BuiltinContext:
     state_db: str
     abort: asyncio.Event | None = None
     log: Logger = field(default_factory=Logger)
+    libstore: LibStore | None = None
 
 
 DEPS_SCHEMA = {
@@ -49,7 +50,16 @@ DEPS_SCHEMA = {
 def start_generated(ctx: BuiltinContext, tool: dict, args: object, mode: str, timeout_ms: int | None = None) -> RunHandle:
     meta = tool["meta"]
     log = ctx.log.child(tool=meta["name"], revision=meta["revision"], mode=mode)
-    handle = ctx.runner.start_file(tool["file"], args, timeout_ms if timeout_ms is not None else meta.get("timeout_ms"), log)
+    pins = meta.get("libs") or []
+    libs = None
+    if pins:
+        if ctx.libstore is None:
+            raise RuntimeError("no library store: cannot resolve pinned libs " + ", ".join(p["name"] for p in pins))
+        try:
+            libs = ctx.libstore.libs_map(pins)
+        except KeyError as e:
+            raise RuntimeError(f"pinned library revision missing: {e.args[0]}") from e
+    handle = ctx.runner.start_file(tool["file"], args, timeout_ms if timeout_ms is not None else meta.get("timeout_ms"), log, libs=libs)
 
     def rec(fut: asyncio.Future) -> None:
         r = fut.result()
