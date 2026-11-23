@@ -106,7 +106,7 @@ class Mistral:
                 out = parse_completion(res.json())
                 log.info("model replied", model=self.model, duration_ms=ms, attempt=attempt,
                          finish_reason=out.finish_reason,
-                         tool_calls=[c.name for c in out.message.get("tool_calls", [])],
+                         tool_calls=[c["function"]["name"] for c in out.message.get("tool_calls", [])],
                          prompt_tokens=(out.usage or {}).get("prompt_tokens"),
                          completion_tokens=(out.usage or {}).get("completion_tokens"))
                 if log.enabled("debug") and out.message.get("content"):
