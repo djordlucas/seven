@@ -19,9 +19,7 @@ Tools, Activity, Jobs, System) and centers only the name label with the instance
 name (the workspace directory's basename) as a chip; the right side holds the
 theme switcher (dark/light, remembered in `localStorage`), the live-stream dot
 and the health readout. The agent roster is grouped into sections per root
-agent (sticky headers with a spawned count, children indented by depth) and
-grows with its items up to the viewport height; the chat panel always matches
-the roster's height exactly. Agent descriptions appear in a floating box after
+agent (sticky column header and sticky section bars with a spawned count, children indented by depth). The roster is only as tall as its entries (capped at the viewport height, then it scrolls) while the chat panel keeps its own height — the two are top-aligned, not stretched to match. Agent descriptions appear in a floating box after
 hovering a roster row for about a second (inline under the name on touch
 devices). |
 

@@ -283,11 +283,12 @@ select { width: auto; }
 
 /* ── agents split view: same-height panels, growing roster ─ */
 
-.split { display: grid; grid-template-columns: minmax(280px, 2fr) 3fr; gap: 14px; align-items: stretch; }
+.split { display: grid; grid-template-columns: minmax(280px, 2fr) 3fr; gap: 14px; align-items: start; }
 .split > .panel { margin-top: 0; } /* beat .panel + .panel inside the grid */
 .split > * { min-width: 0; }
-/* the roster grows with its items (capped at the viewport); the chat
-   stretches to match, so both panels are always exactly the same height */
+/* the roster is only as tall as its entries (capped at the viewport, then it
+   scrolls); the chat keeps its own height — the panels are top-aligned, but
+   the roster no longer stretches to the chat's size */
 .agents-side { height: auto; max-height: calc(100vh - 96px); overflow-y: auto; }
 .chat-pane {
   height: auto; overflow: hidden;
