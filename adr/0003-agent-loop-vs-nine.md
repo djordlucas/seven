@@ -89,6 +89,31 @@ equivalent — and its runner has no permission model by design
 (`docs/runner.md`) — so neither system is safe against a hostile prompt, only
 nine's loop is instrumented for it.
 
+## Assessment of seven's loop
+
+The loop is simple and forgiving where nine's is defensive: it keeps a summary
+instead of trimming, bounds every turn absolutely, and resumes mid-turn after
+a restart.
+
+| Strength | Why it matters | Where |
+|---|---|---|
+| Compaction over trimming | A rolling summary keeps some memory of old turns; nine's trim drops the oldest permanently | `agent/compact.py`, `docs/compaction.md` |
+| Absolute turn bound | `max_steps` guarantees no turn runs away, and the "Stopped after N steps" answer is appended to the conversation so the model sees why it was cut | `agent/agent.py` `turn` |
+| Mid-turn restart recovery | Messages persist as produced; `repair()` closes interrupted tool calls and `needs_resume` restarts an unfinished turn — nine loses the interrupted turn's scratchpad | `agent/agent.py`, `supervisor.py` `start` |
+| Failure simplicity | One dispatch attempt, errors returned as observations, tools never raise into the loop — cheap on tokens for deterministic failures and easy to reason about | `agent/agent.py` `dispatch` |
+
+| Weakness | Consequence | Where |
+|---|---|---|
+| Blunt step cap, no repeat detection | A legitimately progressing turn is still cut at 40 steps, while a model re-issuing the same call burns steps to the cap unnoticed | `agent/agent.py` `turn` |
+| Fragile overflow detection | Overflow is a regex on 400/413/422 plus keywords; a provider that words the error differently fails the turn instead of compacting | `agent/compact.py` `is_overflow` |
+| Invisible tools | Discovery is reveal-only — nothing ranks or searches the catalog, so a tool the model does not think to `describe_tool` never appears in its list | `agent/agent.py` `context` |
+| Coupled turn | Inbox delivery, system-prompt rebuild, compaction and dispatch all live in `turn()`/`complete()`; changing one behavior touches several | `agent/agent.py` |
+| No reasoning control, flat queue | No thinking or planning modes, non-streamed Mistral-only calls, one semaphore for every agent regardless of urgency | `core/llm.py` |
+
+The highest-value borrow from nine is its stuck-turn guards: the repeat-call
+counter and the empty-answer re-draw fit directly into `turn()` and would
+catch the loops the step cap currently absorbs.
+
 ## Limits
 
 | Limit | Detail |
